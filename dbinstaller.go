@@ -104,7 +104,7 @@ func getLastVersion(db *sql.DB) (int, error) {
 	}
 
 	var lastVersion sql.NullInt64
-	row := db.QueryRow("SELECT MAX(version) FROM migrations LIMIT 1")
+	row := db.QueryRow("SELECT MAX(version) FROM migrations")
 	err = row.Scan(&lastVersion)
 	if err != nil {
 		return 0, err
