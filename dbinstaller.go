@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	_ "github.com/lib/pq"
+
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
