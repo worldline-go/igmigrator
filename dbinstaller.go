@@ -18,7 +18,7 @@ import (
 
 // Migrate the database to latest version
 // Only supports up migrations, no plans for down.
-func Migrate(db *sql.DB, migrationsDir string) error {
+func Migrate(db *sql.DB, migrationsDir string,schema string) error {
 	dir, err := os.Open(migrationsDir)
 	if err != nil {
 		return err
@@ -29,8 +29,9 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 		return err
 	}
 
-	lastVersion, err := getLastVersion(db)
+	lastVersion, err := getLastVersion(db,schema)
 	if err != nil {
+		fmt.Println("I am here!!")
 		return err
 	}
 
@@ -85,18 +86,21 @@ func doMigrate(db *sql.DB, version int, filePath string) (err error) {
 
 	_, err = tx.Exec(string(content))
 	if err != nil {
+		fmt.Println("Error Here!!")
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO migrations (version) VALUES (?)", version)
+	fmt.Println(version)
+	_, err = tx.Exec("insert into migrations(version) values( ? )",version)
 	if err != nil {
+		fmt.Println("Here Man!!")
 		return err
 	}
 
 	return tx.Commit()
 }
 
-func getLastVersion(db *sql.DB) (int, error) {
+func getLastVersion(db *sql.DB,schema string) (int, error) {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS migrations (
 		version     INT PRIMARY KEY,
 		date	 			TIMESTAMP NOT NULL DEFAULT NOW()

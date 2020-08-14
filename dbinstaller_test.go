@@ -1,23 +1,40 @@
 package dbinstaller
 
 import (
+	"database/sql"
 	"fmt"
 	"testing"
-	"database/sql"
+
+	_ "github.com/lib/pq"
+)
+
+const (
+	host     = "10.63.80.76"
+	port     = 5432
+	user     = "postgres"
+	password = "MySecret"
+	dbname   = "bodeu1"
 )
 
 func TestMigrate(t *testing.T) {
 
-	db, _ := sql.Open("postgres", "postgres://postgres:MySecret@10.63.80.76/bodeu1")
-	fmt.Println("I am here!!")
-	_, err := db.Begin()
-	fmt.Println("I am here!!")
+	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+		"password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname)
+
+	db, err := sql.Open("postgres", psqlInfo)
 	if err != nil {
-		t.Errorf("Unable to open database")
+		panic(err)
 	}
-	Migrate( db, "testfiles");
-	if 1 == 1 {
-		t.Errorf("TestBindvars count failed")
+	defer db.Close()
+
+	err = db.Ping()
+	if err != nil {
+		panic(err)
+	}
+	err = Migrate(db, "testfiles", "fileparser")
+	if err != nil {
+		fmt.Println(err)
 	}
 }
 
