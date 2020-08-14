@@ -14,6 +14,8 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git"
+	"gitlab.test.igdcs.com/finops/nextgen/utils/db/dbhelper.git"
 )
 
 // Migrate the database to latest version
@@ -90,12 +92,14 @@ func doMigrate(db *sql.DB, version int, filePath string) (err error) {
 		return err
 	}
 
+	q := builder.NewQuery("PostgreSQL", "insert")
+	q.Into("migrations")
+	q.InsertValue("version", version)
+	sqlstmt, vars, err := q.Final()
+	fmt.Println( sqlstmt,vars,err)
+
 	fmt.Println(version)
-	_, err = tx.Exec("insert into migrations(version) values( ? )",version)
-	if err != nil {
-		fmt.Println("Here Man!!")
-		return err
-	}
+	dbhelper.GetResults(db, sqlstmt, vars)
 
 	return tx.Commit()
 }
