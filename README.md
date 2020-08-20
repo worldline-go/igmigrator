@@ -1,2 +1,2 @@
-# DBinstaller
+# IGMigrator
 
