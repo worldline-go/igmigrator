@@ -1,6 +1,7 @@
 package igmigrator
 
 import (
+	"database/sql"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -8,20 +9,19 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"database/sql"
 
-	_ "github.com/lib/pq"
 	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	"gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git"
 	"gitlab.test.igdcs.com/finops/nextgen/utils/db/dbhelper.git"
+	"gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git"
 )
 
 // Migrate the database to latest version
 // Only supports up migrations, no plans for down.
-func Migrate(db *sqlx.DB, migrationsDir string,schema string) error {
+func Migrate(db *sqlx.DB, migrationsDir string, schema string) error {
 	dir, err := os.Open(migrationsDir)
 	if err != nil {
 		return err
@@ -32,7 +32,7 @@ func Migrate(db *sqlx.DB, migrationsDir string,schema string) error {
 		return err
 	}
 
-	lastVersion, err := getLastVersion(db,schema)
+	lastVersion, err := getLastVersion(db, schema)
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func Migrate(db *sqlx.DB, migrationsDir string,schema string) error {
 			Int("updating_to_version", version).
 			Str("file_name", fileName).
 			Msg("")
-		if err := doMigrate(db, version, path.Join(migrationsDir, fileName)); err != nil {
+		if err := doMigrate(db, schema, version, path.Join(migrationsDir, fileName)); err != nil {
 			log.Error().Err(err).Str("file_name", fileName).Msg("")
 			return errors.Wrap(err, fmt.Sprintf("failed to run migration '%s'", fileName))
 		}
@@ -70,7 +70,23 @@ func Migrate(db *sqlx.DB, migrationsDir string,schema string) error {
 	return nil
 }
 
-func doMigrate(db *sqlx.DB, version int, filePath string) (err error) {
+func setSchema(db *sqlx.DB, schema string) error {
+	if schema == "" {
+		return nil
+	}
+	_, err := db.Exec("set search_path to " + schema)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func doMigrate(db *sqlx.DB,schema string, version int, filePath string) error {
+	err := setSchema(db, schema)
+	if err != nil {
+		return err
+	}
+
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to read file '%s'", filePath))
@@ -103,8 +119,13 @@ func doMigrate(db *sqlx.DB, version int, filePath string) (err error) {
 	return err
 }
 
-func getLastVersion(db *sqlx.DB,schema string) (int, error) {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS migrations (
+func getLastVersion(db *sqlx.DB, schema string) (int, error) {
+	err := setSchema(db, schema)
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS migrations (
 		version     INT PRIMARY KEY,
 		date	 	TIMESTAMP NOT NULL DEFAULT NOW()
 	)`)
@@ -118,6 +139,6 @@ func getLastVersion(db *sqlx.DB,schema string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-
+	fmt.Println(lastVersion)
 	return int(lastVersion.Int64), nil
 }

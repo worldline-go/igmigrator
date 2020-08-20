@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	_ "github.com/lib/pq"
 	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 )
 
 func TestMigrate(t *testing.T) {
@@ -19,12 +19,8 @@ func TestMigrate(t *testing.T) {
 		fmt.Println(err)
 	}
 
-	err = Migrate(db, "testfiles", "fileparser")
+	err = Migrate(db, "testfiles", "")
 	if err != nil {
 		fmt.Println(err)
 	}
 }
-
-
-
-
