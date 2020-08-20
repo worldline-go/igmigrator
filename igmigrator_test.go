@@ -19,7 +19,7 @@ func TestMigrate(t *testing.T) {
 		fmt.Println(err)
 	}
 
-	err = Migrate(db, "testfiles", "")
+	err = Migrate(db, "testfiles", "vams")
 	if err != nil {
 		fmt.Println(err)
 	}

@@ -82,11 +82,6 @@ func setSchema(db *sqlx.DB, schema string) error {
 }
 
 func doMigrate(db *sqlx.DB,schema string, version int, filePath string) error {
-	err := setSchema(db, schema)
-	if err != nil {
-		return err
-	}
-
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to read file '%s'", filePath))
@@ -96,15 +91,20 @@ func doMigrate(db *sqlx.DB,schema string, version int, filePath string) error {
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if err != nil {
 			tx.Rollback()
 		}
 	}()
 
+	err = setSchema(db, schema)
+	if err != nil {
+		return err
+	}
+
 	_, err = tx.Exec(string(content))
 	if err != nil {
-		fmt.Println("Error Here!!")
 		return err
 	}
 
@@ -113,7 +113,7 @@ func doMigrate(db *sqlx.DB,schema string, version int, filePath string) error {
 	q.InsertValue("version", version)
 	sqlstmt, vars, err := q.Final()
 
-	dbhelper.GetResults(db, sqlstmt, vars)
+	_, err =dbhelper.GetResults(db, sqlstmt, vars)
 	err = tx.Commit()
 
 	return err
@@ -121,6 +121,9 @@ func doMigrate(db *sqlx.DB,schema string, version int, filePath string) error {
 
 func getLastVersion(db *sqlx.DB, schema string) (int, error) {
 	err := setSchema(db, schema)
+	/* if no schema is configured then the migration script should have schema alter command
+	   if no schema path is not set then migration will happen on public schema
+	*/
 	if err != nil {
 		return 0, err
 	}
@@ -133,12 +136,17 @@ func getLastVersion(db *sqlx.DB, schema string) (int, error) {
 		return 0, err
 	}
 
+	// Lock the migrations table so that other parallel migrations are blocked until current one is finished
+	_,err = db.Exec("begin;	lock table migrations in ACCESS EXCLUSIVE mode;")
+	if err != nil {
+		return 0, err
+	}
+
 	var lastVersion sql.NullInt64
 	row := db.QueryRow("SELECT MAX(version) FROM migrations")
 	err = row.Scan(&lastVersion)
 	if err != nil {
 		return 0, err
 	}
-	fmt.Println(lastVersion)
 	return int(lastVersion.Int64), nil
 }
