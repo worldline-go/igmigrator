@@ -135,20 +135,19 @@ func (igm igMigratorer) doMigrate(version int, filePath string) error {
 	if err != nil {
 		return err
 	}
-	igm.lockMigration()
 
 	defer func() {
 		if err != nil {
 			tx.Rollback()
 		}
 	}()
+	igm.lockMigration()
+	igm.setSchema()
 
 	_, err = tx.Exec(string(content))
 	if err != nil {
 		return err
 	}
-
-	igm.setSchema()
 
 	q := builder.NewQuery("PostgreSQL", "insert")
 	q.Into("migrations")
