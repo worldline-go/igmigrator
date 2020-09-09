@@ -1,6 +1,7 @@
 package igmigrator
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -8,7 +9,11 @@ import (
 	_ "github.com/lib/pq"
 )
 
+var ctx context.Context
+
 func TestMigrate(t *testing.T) {
+
+	var ctx context.Context
 
 	db, err := sqlx.Open("postgres", "postgres://postgres:MySecret@10.63.80.76/bodeu1")
 	if err != nil {
@@ -18,8 +23,9 @@ func TestMigrate(t *testing.T) {
 	if err := db.Ping(); err != nil {
 		fmt.Println(err)
 	}
+	testigm := NewIgMigratorer(db, ctx, "testfiles", "vams")
 
-	err = Migrate(db, "testfiles", "vams")
+	err = testigm.Migrate()
 	if err != nil {
 		fmt.Println(err)
 	}
