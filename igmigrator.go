@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-
-	"gitlab.test.igdcs.com/finops/nextgen/utils/db/dbhelper.git"
-
-	"gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git"
+	//"gitlab.test.igdcs.com/finops/nextgen/utils/db/dbhelper.git"
+	//"gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git"
 
 	"io/ioutil"
 	"os"
@@ -24,38 +22,44 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type igMigratorer struct {
-	db            *sqlx.DB
+type igMigrator struct {
 	ctx           context.Context
+	db            *sqlx.DB
 	migrationsDir string
 	schema        string
 }
 
-type igMigrator interface {
+type igMigratorer interface {
 	Migrate() error
 	lockMigration() error
-	doMigrate(version int, filePath string) error
+	doMigrate(tx *sql.Tx,version int, filePath string) error
 	setSchema()
 	getLastVersion() (int, error)
 }
 
-func NewIgMigratorer(db *sqlx.DB, ctx context.Context, migrationsDir string, schemaParam string) igMigratorer {
+func NewIgMigrator(ctx context.Context,db *sqlx.DB, migrationsDir string, schemaParam string) (igMigrator,error) {
 	var schema string
 	if len(schemaParam) > 0 {
 		schema = schemaParam
 	}
-	return igMigratorer{
-		db:            db,
+	return igMigrator{
 		ctx:           ctx,
+		db:            db,
 		migrationsDir: migrationsDir,
 		schema:        schema,
-	}
+	}, nil
 }
 
 // Migrate will run SQL files in sequence till latest version
 // Only supports up migrations for now
-func (igm igMigratorer) Migrate() error {
-	dir, err := os.Open(igm.migrationsDir)
+func (i igMigrator) Migrate() error {
+	dir, err := os.Open(i.migrationsDir)
+	if err != nil {
+		return err
+	}
+
+	// change the schema path
+	err = i.setSchema()
 	if err != nil {
 		return err
 	}
@@ -65,12 +69,30 @@ func (igm igMigratorer) Migrate() error {
 		return err
 	}
 
-	igm.setSchema()
-	//err = igm.lockMigration()
-	//if err != nil {
-	//	return err
-	//}
-	lastVersion, err := igm.getLastVersion()
+	tx, err := i.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Create the migration table, if not present
+	err = i.createMigrationTable(tx)
+	if err != nil {
+		return err
+	}
+
+    // Lock the migration table, so that operations from other connections are blocked
+	err = i.lockMigration(tx)
+	if err != nil {
+		return err
+	}
+
+	lastVersion, err := i.getLastVersion(tx)
 	if err != nil {
 		return err
 	}
@@ -93,21 +115,27 @@ func (igm igMigratorer) Migrate() error {
 
 	log.Info().Msg(fmt.Sprintf("current_db_version : %v", lastVersion))
 	newVersion := lastVersion
-	for i, value := range versionFiles {
+	for k, value := range versionFiles {
 		fileName := value
-		newVersion = lastVersion + i + 1
+		newVersion = lastVersion + k + 1
+		fmt.Println(newVersion)
 		log.Info().
 			Int("updating_to_version", newVersion).
 			Str("file_name", fileName).
 			Msg("updating DB to new version")
-		if err := igm.doMigrate(newVersion, path.Join(igm.migrationsDir, fileName)); err != nil {
+		fmt.Println(tx, newVersion, path.Join(i.migrationsDir, fileName))
+		if err := i.doMigrate(tx, newVersion, path.Join(i.migrationsDir, fileName)); err != nil {
 			log.Error().Err(err).Str("file_name", fileName).Msg("")
 			return errors.Wrap(err, fmt.Sprintf("failed to run migration '%s'", fileName))
 		}
 	}
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
 	if lastVersion < newVersion {
 		log.Info().Msg(fmt.Sprintf("updated db version to :%v", newVersion))
-	} else if lastVersion < newVersion {
+	} else if lastVersion == newVersion {
 		log.Info().Msgf(fmt.Sprintf("no change in db verion"))
 	}
 	return nil
@@ -115,73 +143,53 @@ func (igm igMigratorer) Migrate() error {
 
 // if no schema is configured then the migration script should have schema alter command
 // when no schema path is not set then migration will happen on public schema
-func (igm igMigratorer) setSchema() error {
-	if igm.schema == "" {
+func (i igMigrator) setSchema() error {
+	if i.schema == "" {
 		return nil
 	}
-	_, err := igm.db.Exec("set search_path to " + igm.schema)
+	_, err := i.db.Exec("set search_path to " + i.schema)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (igm igMigratorer) doMigrate(version int, filePath string) error {
+func (i igMigrator) doMigrate(tx *sql.Tx, version int, filePath string) error {
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to read file '%s'", filePath))
 	}
-	tx, err := igm.db.Begin()
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		}
-	}()
-	igm.lockMigration()
-	igm.setSchema()
 
 	_, err = tx.Exec(string(content))
 	if err != nil {
 		return err
 	}
-
-	q := builder.NewQuery("PostgreSQL", "insert")
-	q.Into("migrations")
-	q.InsertValue("version", version)
-	sqlstmt, vars, err := q.Final()
-
-	_, err = dbhelper.GetResults(igm.db, sqlstmt, vars)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
+	//q := builder.NewQuery("PostgreSQL", "insert")
+	//q.Into(i.schema + ".migrations")
+	//q.InsertValue("version", version)
+	//sqlstmt, vars, err := q.Final()
+	//_, err = dbhelper.GetResults(i.db, sqlstmt, vars)
+	_,err = tx.Exec("insert into migration(version) values(?)",version)
+	return err
 }
 
-func (igm igMigratorer) getLastVersion() (int, error) {
-	_, err := igm.db.Exec(`CREATE TABLE IF NOT EXISTS migrations (
-		version     INT PRIMARY KEY,
+func(i igMigrator) createMigrationTable(tx *sql.Tx) error {
+   _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS migrations (
+		version     INT,
 		date	 	TIMESTAMP NOT NULL DEFAULT NOW()
 	)`)
-	if err != nil {
-		return 0, err
-	}
-
-	var lastVersion sql.NullInt64
-	row := igm.db.QueryRow("SELECT MAX(version) FROM migrations")
-	err = row.Scan(&lastVersion)
-	if err != nil {
-		return 0, err
-	}
-	return int(lastVersion.Int64), nil
+   return err
 }
 
-func (igm igMigratorer) lockMigration() error {
+func (i igMigrator) getLastVersion(tx *sql.Tx) (int, error) {
+	var lastVersion sql.NullInt64
+	err := tx.QueryRow("SELECT MAX(version) FROM migrations").Scan(&lastVersion)
+	return int(lastVersion.Int64),err
+}
+
+func (i igMigrator) lockMigration(tx *sql.Tx) error {
 	// Lock the migrations table so that other parallel migrations are blocked until current one is finished
-	_, err := igm.db.Exec("lock table migrations in ACCESS EXCLUSIVE mode;")
+	_, err := tx.Exec("lock table " + i.schema + ".migrations in ACCESS EXCLUSIVE mode;")
 	if err != nil {
 		return err
 	}

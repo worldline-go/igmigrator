@@ -23,7 +23,10 @@ func TestMigrate(t *testing.T) {
 	if err := db.Ping(); err != nil {
 		fmt.Println(err)
 	}
-	testigm := NewIgMigratorer(db, ctx, "testfiles", "vams")
+	testigm,err := NewIgMigrator( ctx,db, "testfiles", "vams")
+	if err != nil {
+		fmt.Println(err)
+	}
 
 	err = testigm.Migrate()
 	if err != nil {
