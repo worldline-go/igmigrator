@@ -2,7 +2,6 @@ package igmigrator
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -17,19 +16,20 @@ func TestMigrate(t *testing.T) {
 
 	db, err := sqlx.Open("postgres", "postgres://postgres:MySecret@10.63.80.76/bodeu1")
 	if err != nil {
-		fmt.Println(err)
+		t.Errorf("failed to connect to database : %s", err.Error())
 	}
 
 	if err := db.Ping(); err != nil {
-		fmt.Println(err)
-	}
-	testigm,err := NewIgMigrator( ctx,db, "testfiles", "vams")
-	if err != nil {
-		fmt.Println(err)
+		t.Errorf("failed to ping database : %s", err.Error())
 	}
 
-	err = testigm.Migrate()
+	ti, err := NewIgMigrator(ctx, db, "testfiles", "vams")
 	if err != nil {
-		fmt.Println(err)
+		t.Errorf("failed to create a new migrator: %s", err.Error())
+	}
+
+	err = ti.Migrate()
+	if err != nil {
+		t.Errorf("migration failed: %s", err.Error())
 	}
 }
