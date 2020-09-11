@@ -18,6 +18,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git"
 )
 
 type igMigrator struct {
@@ -160,7 +161,12 @@ func (i igMigrator) doSingleMigrate(tx *sql.Tx, version int, filePath string) er
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO migrations (version) VALUES ($1)", version)
+	q := builder.NewQuery("PostgreSQL", builder.CommandInsert)
+	q.Into("migrations")
+	q.InsertValue("version", version)
+	insert, vars, err := q.Final()
+
+	_, err = tx.Exec(insert, vars[0])
 	if err != nil {
 		return err
 	}

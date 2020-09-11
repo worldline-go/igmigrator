@@ -12,5 +12,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rs/zerolog v1.19.0
 	github.com/shopspring/decimal v1.2.0 // indirect
+	gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git v1.1.0
 	google.golang.org/appengine v1.6.6 // indirect
 )
