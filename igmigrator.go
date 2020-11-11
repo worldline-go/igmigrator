@@ -3,198 +3,332 @@ package igmigrator
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
-
 	"io/ioutil"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/jmoiron/sqlx"
-
-	_ "github.com/jackc/pgx"
-
-	"github.com/pkg/errors"
-	"github.com/rs/zerolog/log"
-	"gitlab.test.igdcs.com/finops/nextgen/utils/db/query/builder.git"
+	"github.com/rs/zerolog"
 )
 
-type igMigrator struct {
-	ctx           context.Context
-	db            *sqlx.DB
-	migrationsDir string
-	schema        string
+type (
+	BeforeMigrationsFunc     func(ctx context.Context, currentVersion int)
+	AfterSingleMigrationFunc func(ctx context.Context, filePath string, newVersion int)
+	AfterAllMigrationsFunc   func(ctx context.Context, previousVersion, newVersion int)
+)
+
+// DefaultMigrationFileSkipper defines default behavior for skipping migration files.
+// File will be skipped if it is a directory, does not have suffix ".sql" or does not have version suffix.
+var DefaultMigrationFileSkipper = func(file os.FileInfo, currentVersion int) bool {
+	fileName := file.Name()
+	if file.IsDir() || !strings.Contains(fileName, "_") || !strings.HasSuffix(fileName, ".sql") {
+		return true
+	}
+
+	fileVer := VersionFromFile(fileName)
+	return fileVer == -1 || fileVer <= currentVersion
 }
 
-type igMigratorer interface {
-	Migrate() error
-	lockMigration() error
-	doSingleMigrate(tx *sql.Tx, version int, filePath string) error
-	setSchema()
-	getLastVersion() (int, error)
+// MigrationFileSkipper specifies which migration files will be skipped.
+// If this function returns false - file will be added to migration files list.
+// If returned true - file is skipped.
+var MigrationFileSkipper = DefaultMigrationFileSkipper
+
+// DB is simple interface that provides ability to start transaction.
+type DB interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 }
 
-func NewIgMigrator(ctx context.Context, db *sqlx.DB, migrationsDir string, schemaParam ...string) (igMigrator, error) {
-	var schema string
-	if len(schemaParam) > 0 {
-		schema = schemaParam[0]
-	}
-	return igMigrator{
-		ctx:           ctx,
-		db:            db,
-		migrationsDir: migrationsDir,
-		schema:        schema,
-	}, nil
+// DB holds related database methods.
+type Transaction interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 }
 
-// Migrate will run SQL files in sequence till latest version
-func (i igMigrator) Migrate() error {
-	dir, err := os.Open(i.migrationsDir)
-	if err != nil {
-		return err
+type Config struct {
+	MigrationsDir  string
+	Schema         string
+	MigrationTable string
+
+	// BeforeMigrationsFunc will be called after current DB version is retrieved
+	BeforeMigrationsFunc
+	// AfterSingleMigrationFunc will be called after each single transaction was run
+	AfterSingleMigrationFunc
+	// AfterAllMigrationsFunc will be executed when all of the migrations were executed successfully.
+	// It will not be called if any error happened.
+	AfterAllMigrationsFunc
+}
+
+type Migrator struct {
+	Cnf    *Config
+	Tx     Transaction
+	Logger *zerolog.Logger
+}
+
+// Migrate searches for migration files and runs them. This should be main entry point in most cases.
+//
+// This function should receive plain database connection, not transaction!
+// If transaction should be used - use MigrateInTx
+//
+// This function returns version before and after migration.
+func Migrate(ctx context.Context, db DB, config *Config) (previousVersion, newVersion int, err error) {
+	var tx interface {
+		Transaction
+		driver.Tx
 	}
 
-	// change the schema path
-	err = i.setSchema()
+	tx, err = db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 
-	files, err := dir.Readdir(0)
+	previousVersion, newVersion, err = MigrateInTx(ctx, tx, config)
 	if err != nil {
-		return err
-	}
-
-	tx, err := i.db.Begin()
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if err != nil {
-			tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return previousVersion, newVersion, fmt.Errorf("%w, also rollback error: %s", err, rollbackErr.Error())
 		}
-	}()
 
-	// Create the migration table, if not present
-	err = i.createMigrationTable(tx)
+		return previousVersion, newVersion, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return previousVersion, previousVersion, err
+	}
+
+	if aam := config.AfterAllMigrationsFunc; aam != nil {
+		aam(ctx, previousVersion, newVersion)
+	}
+
+	return previousVersion, newVersion, nil
+}
+
+// MigrateInTx will run SQL files in sequence till latest version. Generally Migrate should be used instead.
+//
+// This function MUST operate on transaction! If plain database connection will be provided - it will return error.
+// This function will does only DB queries, which means that no transaction stuff will be used.
+func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (int, int, error) {
+	cnf.SetDefaults()
+
+	migration := Migrator{
+		Cnf:    cnf,
+		Tx:     tx,
+		Logger: zerolog.Ctx(ctx),
+	}
+
+	if err := migration.SetSchema(ctx); err != nil {
+		return 0, 0, err
+	}
+
+	if err := migration.prepareDB(ctx); err != nil {
+		return 0, 0, err
+	}
+
+	lastVersion, err := migration.GetLastVersion(ctx)
 	if err != nil {
+		return 0, 0, err
+	}
+
+	migration.Logger.Info().Int("version", lastVersion).Msg("current database version")
+
+	if bmf := cnf.BeforeMigrationsFunc; bmf != nil {
+		bmf(ctx, lastVersion)
+	}
+
+	migrations, err := migration.GetMigrationFiles(cnf.MigrationsDir, lastVersion)
+	if err != nil || len(migrations) == 0 { // Exit early if nothing to do
+		if l := migration.Logger.Info(); len(migrations) == 0 && l.Enabled() {
+			l.Msg("database is up to date")
+		}
+
+		return lastVersion, lastVersion, err
+	}
+
+	newVersion, err := migration.MigrateMultiple(ctx, migrations, lastVersion)
+	if err != nil {
+		return lastVersion, lastVersion, err
+	}
+
+	return lastVersion, newVersion, nil
+}
+
+// SetDefaults will update missing values with default ones(if any).
+func (c *Config) SetDefaults() {
+	replaceRegexp := regexp.MustCompile("[^a-zA-Z0-9_]")
+
+	trim := func(input string) string {
+		return replaceRegexp.ReplaceAllLiteralString(input, "")
+	}
+
+	setString := func(s *string, env, def string) {
+		*s = strings.TrimSpace(*s)
+
+		if *s == "" {
+			*s = os.Getenv(env)
+		}
+
+		if *s == "" {
+			*s = def
+		}
+	}
+
+	c.Schema = strings.TrimSpace(c.Schema)
+
+	setString(&c.MigrationsDir, "IGMIGRATOR_MIGRATION_DIR", "/var/migrations")
+	setString(&c.MigrationTable, "IGMIGRATION_MIGRATION_TABLE", "migration")
+
+	c.MigrationTable = trim(c.MigrationTable)
+	c.Schema = trim(c.Schema)
+}
+
+// prepareDB creates migration table and locks it
+// Migration table will be unlocked when transaction will be committed/rollbacked.
+func (m *Migrator) prepareDB(ctx context.Context) error {
+	// Create the migration table, if not present
+	if err := m.CreateMigrationTable(ctx); err != nil {
 		return err
 	}
 
 	// Lock the migration table, so that operations from other connections are blocked
-	err = i.lockMigration(tx)
+	return m.AcquireLock(ctx)
+}
+
+// GetMigrationFiles will return sorted slice of migration files that should be executed.
+// By default it will not include any migrations that are below current version,
+// but this behavior could be changed by changing MigrationFileSkipper.
+func (m *Migrator) GetMigrationFiles(migrationDir string, lastVersion int) ([]string, error) {
+	dir, err := os.Open(migrationDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	lastVersion, err := i.getLastVersion(tx)
+	files, err := dir.Readdir(0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// versions := make([]int, 0, len(files))
 	versionFiles := make([]string, 0, len(files))
+
 	for _, file := range files {
-		fileName := file.Name()
-		if !strings.Contains(fileName, "_") {
+		if MigrationFileSkipper(file, lastVersion) {
 			continue
 		}
-		version, _ := strconv.Atoi(strings.Split(fileName, "_")[0])
-		if version <= lastVersion {
-			continue
-		}
-		versionFiles = append(versionFiles, fileName)
+
+		versionFiles = append(versionFiles, file.Name())
 	}
+
 	sort.Strings(versionFiles)
 
-	log.Info().Msgf("current db_version : %v", lastVersion)
-	newVersion := lastVersion
-	for k, value := range versionFiles {
-		fileName := value
-		newVersion = lastVersion + k + 1
-		log.Info().
-			Int("updating_to_version", newVersion).
-			Str("file_name", fileName).
-			Msg("updating DB to new version")
-		if err := i.doSingleMigrate(tx, newVersion, path.Join(i.migrationsDir, fileName)); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("failed to run migration '%s'", fileName))
-		}
-	}
-	err = tx.Commit()
-	if err != nil {
-		return err
-	}
-	if lastVersion < newVersion {
-		log.Info().Msgf("updated db version to :%v", newVersion)
-	} else if lastVersion == newVersion {
-		log.Info().Msg("no change in db version")
-	}
-	return nil
+	return versionFiles, nil
 }
 
-// if no schema is configured then the migration script should have schema alter command
-// when no schema path is not set then migration will happen on public schema
-func (i igMigrator) setSchema() error {
-	if i.schema == "" {
+// SetSchema will switch current search_path to one specified in configuration.
+// If schema name is empty after trimming - it is no-op.
+func (m *Migrator) SetSchema(ctx context.Context) error {
+	trimmed := strings.TrimSpace(m.Cnf.Schema)
+
+	if trimmed == "" {
 		return nil
 	}
-	_, err := i.db.Exec("set search_path to " + i.schema)
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
-// doSingleMigrate executes a single migration
-func (i igMigrator) doSingleMigrate(tx *sql.Tx, version int, filePath string) error {
-	migration, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		log.Info().Msgf("failed to  read file :%s", filePath)
-		return err
-	}
+	_, err := m.Tx.ExecContext(ctx, "set search_path = "+trimmed)
 
-	_, err = tx.Exec(string(migration))
-	if err != nil {
-		return err
-	}
-
-	q := builder.NewQuery("PostgreSQL", builder.CommandInsert)
-	q.Into("migrations")
-	q.InsertValue("version", version)
-	insert, vars, err := q.Final()
-
-	_, err = tx.Exec(insert, vars[0])
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// createMigrationTable creates the migration table if not present
-func (i igMigrator) createMigrationTable(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS migrations (
-		version     INT PRIMARY KEY,
-		date	 	TIMESTAMP NOT NULL DEFAULT NOW()
-	)`)
 	return err
 }
 
-// getLastVersion returns the latest migration version
-func (i igMigrator) getLastVersion(tx *sql.Tx) (int, error) {
-	var lastVersion sql.NullInt64
-	err := tx.QueryRow("SELECT MAX(version) FROM migrations").Scan(&lastVersion)
-	return int(lastVersion.Int64), err
+// MigrateMultiple runs all the migrations provided in migrations slice.
+// After each successful migration new version will be inserted in migration table.
+//
+// This method will call Config.AfterSingleMigrationFunc after each successful migration.
+func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, lastVersion int) (int, error) {
+	newVersion := lastVersion
+
+	for _, fileName := range migrations {
+		filePath := path.Join(m.Cnf.MigrationsDir, fileName)
+		newVersion = VersionFromFile(fileName)
+
+		if err := m.MigrateSingle(ctx, filePath); err != nil {
+			return lastVersion, err
+		}
+
+		if err := m.InsertNewVersion(ctx, newVersion); err != nil {
+			return lastVersion, err
+		}
+
+		// This single migrations should not be point of interest in most cases.
+		if l := m.Logger.Trace(); l.Enabled() {
+			l.Int("migrated_to", newVersion).
+				Str("migration_path", filePath).
+				Msg("run one migration")
+		}
+
+		if am := m.Cnf.AfterSingleMigrationFunc; am != nil {
+			am(ctx, filePath, newVersion)
+		}
+	}
+
+	return newVersion, nil
 }
 
-// lockMigration acquires lock on migration table so that no other parallel migration is allowed
-func (i igMigrator) lockMigration(tx *sql.Tx) error {
-	// Lock the migrations table so that other parallel migrations are blocked until current one is finished
-	_, err := tx.Exec("lock table migrations in ACCESS EXCLUSIVE mode;")
+// MigrateSingle executes a single migration.
+// It does not increase version in migration table.
+func (m *Migrator) MigrateSingle(ctx context.Context, filePath string) error {
+	migration, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
+
+	_, err = m.Tx.ExecContext(ctx, string(migration))
+
+	return err
+}
+
+// InsertNewVersion adds new migration version to migration table.
+func (m *Migrator) InsertNewVersion(ctx context.Context, version int) error {
+	_, err := m.Tx.ExecContext(ctx, "insert into "+m.Cnf.MigrationTable+"(version) values ($1)", version)
+	return err
+}
+
+// CreateMigrationTable creates the migration table if not present.
+func (m *Migrator) CreateMigrationTable(ctx context.Context) error {
+	_, err := m.Tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+m.Cnf.MigrationTable+` (
+		version     INT PRIMARY KEY,
+		migrated_on	 	TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`)
+
+	return err
+}
+
+// GetLastVersion returns the latest migration version.
+func (m *Migrator) GetLastVersion(ctx context.Context) (int, error) {
+	var lastVersion sql.NullInt64
+	//nolint:gosec // m.Cnf.MigrationTable is cleaned up to have only ASCII letters, numbers and '_'.
+	err := m.Tx.QueryRowContext(ctx, "SELECT MAX(version) FROM "+m.Cnf.MigrationTable).Scan(&lastVersion)
+
+	return int(lastVersion.Int64), err
+}
+
+// AcquireLock acquires lock on migration table so that no other parallel migration is allowed.
+func (m *Migrator) AcquireLock(ctx context.Context) error {
+	// Lock the migrations table so that other parallel migrations are blocked until current one is finished
+	_, err := m.Tx.ExecContext(ctx, "lock table "+m.Cnf.MigrationTable+" in ACCESS EXCLUSIVE mode;")
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// VersionFromFile returns version of migration file.
+func VersionFromFile(fileName string) int {
+	version, err := strconv.Atoi(strings.Split(fileName, "_")[0])
+	if err != nil {
+		return -1
+	}
+
+	return version
 }
