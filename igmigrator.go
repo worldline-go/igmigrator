@@ -289,13 +289,13 @@ func (m *Migrator) MigrateSingle(ctx context.Context, filePath string) error {
 
 // InsertNewVersion adds new migration version to migration table.
 func (m *Migrator) InsertNewVersion(ctx context.Context, version int) error {
-	_, err := m.Tx.ExecContext(ctx, "insert into "+m.Cnf.MigrationTable+"(version) values ($1)", version)
+	_, err := m.Tx.ExecContext(ctx, "insert into "+m.MigrationTable()+"(version) values ($1)", version)
 	return err
 }
 
 // CreateMigrationTable creates the migration table if not present.
 func (m *Migrator) CreateMigrationTable(ctx context.Context) error {
-	_, err := m.Tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+m.Cnf.MigrationTable+` (
+	_, err := m.Tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+m.MigrationTable()+` (
 		version     INT PRIMARY KEY,
 		migrated_on	 	TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`)
@@ -307,7 +307,7 @@ func (m *Migrator) CreateMigrationTable(ctx context.Context) error {
 func (m *Migrator) GetLastVersion(ctx context.Context) (int, error) {
 	var lastVersion sql.NullInt64
 	//nolint:gosec // m.Cnf.MigrationTable is cleaned up to have only ASCII letters, numbers and '_'.
-	err := m.Tx.QueryRowContext(ctx, "SELECT MAX(version) FROM "+m.Cnf.MigrationTable).Scan(&lastVersion)
+	err := m.Tx.QueryRowContext(ctx, "SELECT MAX(version) FROM "+m.MigrationTable()).Scan(&lastVersion)
 
 	return int(lastVersion.Int64), err
 }
@@ -315,12 +315,20 @@ func (m *Migrator) GetLastVersion(ctx context.Context) (int, error) {
 // AcquireLock acquires lock on migration table so that no other parallel migration is allowed.
 func (m *Migrator) AcquireLock(ctx context.Context) error {
 	// Lock the migrations table so that other parallel migrations are blocked until current one is finished
-	_, err := m.Tx.ExecContext(ctx, "lock table "+m.Cnf.MigrationTable+" in ACCESS EXCLUSIVE mode;")
+	_, err := m.Tx.ExecContext(ctx, "lock table "+m.MigrationTable()+" in ACCESS EXCLUSIVE mode;")
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (m *Migrator) MigrationTable() string {
+	if m.Cnf.Schema == "" {
+		return m.Cnf.MigrationTable
+	}
+
+	return m.Cnf.Schema + "." + m.Cnf.MigrationTable
 }
 
 // VersionFromFile returns version of migration file.
