@@ -36,13 +36,13 @@ func TestSetSchema(t *testing.T) {
 		{
 			Schema: "test",
 			SetUp: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("set search_path = test").WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectExec("set local search_path = test").WillReturnResult(sqlmock.NewResult(0, 0))
 			},
 		},
 		{
 			Schema: "   a ",
 			SetUp: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("set search_path = a").WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectExec("set local search_path = a").WillReturnResult(sqlmock.NewResult(0, 0))
 			},
 		},
 	}

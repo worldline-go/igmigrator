@@ -237,7 +237,7 @@ func (m *Migrator) SetSchema(ctx context.Context) error {
 		return nil
 	}
 
-	_, err := m.Tx.ExecContext(ctx, "set search_path = "+trimmed)
+	_, err := m.Tx.ExecContext(ctx, "set local search_path = "+trimmed)
 
 	return err
 }
