@@ -178,7 +178,7 @@ func (c *Config) SetDefaults() {
 
 	c.Schema = strings.TrimSpace(c.Schema)
 
-	setString(&c.MigrationsDir, "IGMIGRATOR_MIGRATION_DIR", "/var/migrations")
+	setString(&c.MigrationsDir, "IGMIGRATOR_MIGRATION_DIR", "migrations")
 	setString(&c.MigrationTable, "IGMIGRATION_MIGRATION_TABLE", "migration")
 
 	c.MigrationTable = trim(c.MigrationTable)
