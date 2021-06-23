@@ -221,7 +221,9 @@ func (m *Migrator) GetMigrationFiles(migrationDir string, lastVersion int) ([]st
 		versionFiles = append(versionFiles, file.Name())
 	}
 
-	sort.Strings(versionFiles)
+	sort.Slice(versionFiles, func(i, j int) bool {
+		return VersionFromFile(versionFiles[i]) < VersionFromFile(versionFiles[j])
+	})
 
 	return versionFiles, nil
 }

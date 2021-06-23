@@ -149,6 +149,33 @@ func TestMigrations(t *testing.T) {
 			},
 		},
 		{
+			Path: "migrations_sorted_by_version",
+			ValidateVersFunc: func(t *testing.T, prev int, current int) {
+				assert.Equal(t, 0, prev)
+				assert.Equal(t, 21, current)
+			},
+			ValidateFunc: func(t *testing.T, db *sqlx.DB, conf *Config) {
+				assertTables(t, db, conf.Schema, []tableStruct{
+					{"another", "id"},
+					{"another", "purchased_at"},
+					{"migration", "migrated_on"},
+					{"migration", "version"},
+					{"test", "created_at"},
+					{"test", "description"},
+					{"test", "id"},
+					{"users", "id"},
+				})
+
+				assertMigrations(t, db, conf.MigrationTable, []migrationData{
+					{Version: 1},
+					{Version: 2},
+					{Version: 3},
+					{Version: 10},
+					{Version: 21},
+				})
+			},
+		},
+		{
 			Path: "skip_item",
 			PrepareFunc: func(t *testing.T, db *sqlx.DB, conf *Config) {
 				m := Migrator{Tx: db, Cnf: conf}

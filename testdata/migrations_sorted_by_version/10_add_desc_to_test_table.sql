@@ -1,0 +1,1 @@
+ALTER TABLE "test" ADD description varchar(127) NOT NULL DEFAULT ''
