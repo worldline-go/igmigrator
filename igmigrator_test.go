@@ -11,7 +11,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"gitlab.test.igdcs.com/finops/nextgen/utils/db/igmigrator.git/testdata"
 )
 
@@ -250,5 +249,52 @@ func assertMigrations(t *testing.T, db *sqlx.DB, migrationTable string, expected
 	for i := range expected {
 		assert.NotEmpty(t, migrations[i].MigratedOn)
 		assert.Equal(t, expected[i].Version, migrations[i].Version)
+	}
+}
+
+func TestVersionFromFile(t *testing.T) {
+	type args struct {
+		fileName string
+	}
+	tests := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			name: "empty check",
+			args: args{
+				fileName: "",
+			},
+			want: -1,
+		},
+		{
+			name: "non number",
+			args: args{
+				fileName: "test_abc.sql",
+			},
+			want: -1,
+		},
+		{
+			name: "number with underscore",
+			args: args{
+				fileName: "123_test_abc_1.sql",
+			},
+			want: 123,
+		},
+		{
+			name: "number concated",
+			args: args{
+				fileName: "0123testabc1.sql",
+			},
+			want: 123,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := VersionFromFile(tt.args.fileName); got != tt.want {
+				t.Errorf("VersionFromFile() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

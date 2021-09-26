@@ -26,7 +26,7 @@ type (
 // File will be skipped if it is a directory, does not have suffix ".sql" or does not have version suffix.
 var DefaultMigrationFileSkipper = func(file os.FileInfo, currentVersion int) bool {
 	fileName := file.Name()
-	if file.IsDir() || !strings.Contains(fileName, "_") || !strings.HasSuffix(fileName, ".sql") {
+	if file.IsDir() || !strings.HasSuffix(fileName, ".sql") {
 		return true
 	}
 
@@ -332,8 +332,12 @@ func (m *Migrator) MigrationTable() string {
 }
 
 // VersionFromFile returns version of migration file.
+var versionRegex = regexp.MustCompile(`^\d+`)
+
 func VersionFromFile(fileName string) int {
-	version, err := strconv.Atoi(strings.Split(fileName, "_")[0])
+	versionFound := versionRegex.FindString(fileName)
+
+	version, err := strconv.Atoi(versionFound)
 	if err != nil {
 		return -1
 	}
