@@ -31,6 +31,7 @@ var DefaultMigrationFileSkipper = func(file os.FileInfo, currentVersion int) boo
 	}
 
 	fileVer := VersionFromFile(fileName)
+
 	return fileVer == -1 || fileVer <= currentVersion
 }
 
@@ -280,11 +281,9 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 		}
 
 		// This single migrations should not be point of interest in most cases.
-		if l := m.Logger.Trace(); l.Enabled() {
-			l.Int("migrated_to", newVersion).
-				Str("migration_path", filePath).
-				Msg("run one migration")
-		}
+		m.Logger.Debug().Int("migrated_to", newVersion).
+			Str("migration_path", filePath).
+			Msg("run migration")
 
 		if am := m.Cnf.AfterSingleMigrationFunc; am != nil {
 			am(ctx, filePath, newVersion)
@@ -310,6 +309,7 @@ func (m *Migrator) MigrateSingle(ctx context.Context, filePath string) error {
 // InsertNewVersion adds new migration version to migration table.
 func (m *Migrator) InsertNewVersion(ctx context.Context, version int) error {
 	_, err := m.Tx.ExecContext(ctx, "insert into "+m.MigrationTable()+"(version) values ($1)", version)
+
 	return err
 }
 

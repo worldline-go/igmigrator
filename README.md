@@ -2,7 +2,11 @@
 
 This tool get list of sql files in a folder and apply them with recording last migrationed file's version to remember in future updates as new files comes.
 
-For example `testdata/normal` folder has 2 file that file names are `1-test.sql` and `5-test2.sql`. After run the migration tool related migration table record last number which is 5 in our case. So next run folder will check again and apply sql files which is has number bigger than 5.
+```sh
+go get gitlab.test.igdcs.com/finops/nextgen/utils/db/igmigrator.git
+```
+
+Example `testdata/normal` folder has 2 file that file names are `1-test.sql` and `5-test2.sql`. After run the migration tool related migration table record last number which is 5 in our case. So next run folder will check again and apply sql files which is has number bigger than 5.
 
 File names must start with a number and it should have `.sql` suffix.
 
@@ -16,6 +20,9 @@ Example of correct file names:
 ```
 
 Without a number, it will be assumed `-1`.
+
+`MigrationsDir` get data from environment variable `IGMIGRATOR_MIGRATION_DIR` and default value is `migrations`  
+`MigrationTable` get data from environment variable `IGMIGRATION_MIGRATION_TABLE` and default value is `migration`
 
 ---
 
