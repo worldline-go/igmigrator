@@ -220,7 +220,6 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 		}
 
 		if err := m.InsertNewVersion(ctx, newVersion); err != nil {
-			panic(err)
 			return lastVersion, err
 		}
 
