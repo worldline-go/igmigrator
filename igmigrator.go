@@ -51,38 +51,6 @@ type Transaction interface {
 	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 }
 
-// Config provides a way to specify some optional configuration.
-//
-// Most configuration options have sane defaults, which should not be changed if not specifically required.
-//
-// By default no callbacks are not set.
-type Config struct {
-	// MigrationsDir can provide a directory that will hold the migration files.
-	//
-	// By default has value of `/var/migrations/`, and should not be changed if not required.
-	// It is possible to set this value from environment variable `IGMIGRATOR_MIGRATION_DIR`
-	// if value for this variable is not set.
-	MigrationsDir string
-	// Schema can specify which schema(using `set search_path`) should be used to run migrations in.
-	//
-	// By default it will not change schema.
-	Schema string
-	// MigrationTable can provide table name for the table that will hold migrations.
-	//
-	// By default has value of 'migrations', and should not be changed if not required.
-	// It is possible to set this value from environment variable `IGMIGRATION_MIGRATION_TABLE`
-	// if value for this variable is not set.
-	MigrationTable string
-
-	// BeforeMigrationsFunc will be called after current DB version is retrieved
-	BeforeMigrationsFunc
-	// AfterSingleMigrationFunc will be called after each single transaction was run
-	AfterSingleMigrationFunc
-	// AfterAllMigrationsFunc will be executed when all of the migrations were executed successfully.
-	// It will not be called if any error happened.
-	AfterAllMigrationsFunc
-}
-
 type Migrator struct {
 	Cnf    *Config
 	Tx     Transaction
@@ -126,10 +94,10 @@ func Migrate(ctx context.Context, db DB, config *Config) (previousVersion, newVe
 	return previousVersion, newVersion, nil
 }
 
-// MigrateInTx will run SQL files in sequence till latest version. Generally Migrate should be used instead.
+// MigrateInTx will run SQL files in sequence till the latest version. Generally Migrate should be used instead.
 //
 // This function MUST operate on transaction! If plain database connection will be provided - it will return error.
-// This function will does only DB queries, which means that no transaction stuff will be used.
+// This function will do only DB queries, which means that no transaction stuff will be used.
 func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (int, int, error) {
 	cnf.SetDefaults()
 
@@ -164,7 +132,7 @@ func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (int, int, er
 	}
 
 	// Lock migration table to avoid race condition.
-	if migration.AcquireLock(ctx); err != nil {
+	if err := migration.AcquireLock(ctx); err != nil {
 		return lastVersion, lastVersion, err
 	}
 
@@ -180,37 +148,8 @@ func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (int, int, er
 	return lastVersion, newVersion, nil
 }
 
-// SetDefaults will update missing values with default ones(if any).
-func (c *Config) SetDefaults() {
-	replaceRegexp := regexp.MustCompile("[^a-zA-Z0-9_]")
-
-	trim := func(input string) string {
-		return replaceRegexp.ReplaceAllLiteralString(input, "")
-	}
-
-	setString := func(s *string, env, def string) {
-		*s = strings.TrimSpace(*s)
-
-		if *s == "" {
-			*s = os.Getenv(env)
-		}
-
-		if *s == "" {
-			*s = def
-		}
-	}
-
-	c.Schema = strings.TrimSpace(c.Schema)
-
-	setString(&c.MigrationsDir, "IGMIGRATOR_MIGRATION_DIR", "migrations")
-	setString(&c.MigrationTable, "IGMIGRATION_MIGRATION_TABLE", "migration")
-
-	c.MigrationTable = trim(c.MigrationTable)
-	c.Schema = trim(c.Schema)
-}
-
 // prepareDB creates migration table and locks it
-// Migration table will be unlocked when transaction will be committed/rollbacked.
+// Migration table will be unlocked when transaction will be committed/rolled back.
 func (m *Migrator) prepareDB(ctx context.Context) error {
 	// Create the migration table, if not present
 	if err := m.CreateMigrationTable(ctx); err != nil {
@@ -221,7 +160,7 @@ func (m *Migrator) prepareDB(ctx context.Context) error {
 }
 
 // GetMigrationFiles will return sorted slice of migration files that should be executed.
-// By default it will not include any migrations that are below current version,
+// By default, it will not include any migrations that are below current version,
 // but this behavior could be changed by changing MigrationFileSkipper.
 func (m *Migrator) GetMigrationFiles(migrationDir string, lastVersion int) ([]string, error) {
 	dir, err := os.Open(migrationDir)
@@ -281,6 +220,7 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 		}
 
 		if err := m.InsertNewVersion(ctx, newVersion); err != nil {
+			panic(err)
 			return lastVersion, err
 		}
 

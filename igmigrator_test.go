@@ -64,56 +64,6 @@ func TestSetSchema(t *testing.T) {
 	}
 }
 
-func TestConfig_SetDefaults(t *testing.T) {
-	tests := []struct {
-		Input    Config
-		Validate func(t *testing.T, cnf Config)
-	}{
-		{
-			Input: Config{Schema: "  "},
-			Validate: func(t *testing.T, cnf Config) {
-				assert.Equal(t, "", cnf.Schema)
-			},
-		},
-		{
-			Input: Config{Schema: " asdd ad "},
-			Validate: func(t *testing.T, cnf Config) {
-				assert.Equal(t, "asddad", cnf.Schema)
-			},
-		},
-		{
-			Input: Config{MigrationTable: " "},
-			Validate: func(t *testing.T, cnf Config) {
-				assert.Equal(t, "migration", cnf.MigrationTable)
-			},
-		},
-		{
-			Input: Config{MigrationTable: " aaa_ss4 !!"},
-			Validate: func(t *testing.T, cnf Config) {
-				assert.Equal(t, "aaa_ss4", cnf.MigrationTable)
-			},
-		},
-		{
-			// No validations are done on input migration directory.
-			// If it is invalid - error will be returned anyhow.
-			Input: Config{MigrationsDir: "/aa_a187&*%*3/aa  a/"},
-			Validate: func(t *testing.T, cnf Config) {
-				assert.Equal(t, "/aa_a187&*%*3/aa  a/", cnf.MigrationsDir)
-			},
-		},
-	}
-
-	for i := range tests {
-		test := tests[i]
-
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			test.Input.SetDefaults()
-			test.Validate(t, test.Input)
-		})
-
-	}
-}
-
 func TestMigrations(t *testing.T) {
 	tests := []struct {
 		Name             string
@@ -324,4 +274,75 @@ func TestVersionFromFile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMigrate_Locking(t *testing.T) {
+	tests := []struct {
+		name   string
+		init   func(mock sqlmock.Sqlmock)
+		prev   int
+		actual int
+	}{
+		{
+			name: "lock_table_for_updates",
+			init: func(mck sqlmock.Sqlmock) {
+				mck.MatchExpectationsInOrder(true)
+
+				mck.ExpectBegin()
+
+				// Create migration table if not exists.
+				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( version INT PRIMARY KEY, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
+				// Get actual version.
+				mck.ExpectQuery("SELECT MAX\\(version\\) FROM migration").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(int64(0)))
+				// Lock migration table.
+				mck.ExpectExec("lock table migration in ACCESS EXCLUSIVE mode").WillReturnResult(sqlmock.NewResult(0, 0))
+				// Apply db schema change.
+				mck.ExpectExec("CREATE TABLE accounts \\( user_id serial PRIMARY KEY, last_login TIMESTAMP \\)").WillReturnResult(sqlmock.NewResult(1, 1))
+				// Update version.
+				mck.ExpectExec("insert into migration\\(version\\) values \\(\\$1\\)").WithArgs(1).WillReturnResult(sqlmock.NewResult(1, 1))
+
+				mck.ExpectCommit()
+			},
+			prev:   0,
+			actual: 1,
+		},
+		{
+			name: "no_update_no_lock",
+			init: func(mck sqlmock.Sqlmock) {
+				mck.MatchExpectationsInOrder(true)
+
+				mck.ExpectBegin()
+
+				// Create migration table if not exists.
+				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( version INT PRIMARY KEY, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
+				// Get actual version.
+				mck.ExpectQuery("SELECT MAX\\(version\\) FROM migration").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(int64(1)))
+
+				mck.ExpectCommit()
+			},
+			prev:   1,
+			actual: 1,
+		},
+	}
+	for _, scenario := range tests {
+		t.Run(scenario.name, func(t *testing.T) {
+			db, mck, err := sqlmock.New()
+			require.Nil(t, err)
+
+			defer db.Close()
+
+			scenario.init(mck)
+
+			conf := &Config{}
+			conf.SetDefaults()
+			conf.MigrationsDir = testdata.Path("locking")
+
+			prev, actual, err := Migrate(context.Background(), db, conf)
+			require.NoError(t, err)
+			require.Equal(t, scenario.prev, prev)
+			require.Equal(t, scenario.actual, actual)
+			require.NoError(t, mck.ExpectationsWereMet())
+		})
+	}
+
 }
