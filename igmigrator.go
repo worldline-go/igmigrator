@@ -154,10 +154,6 @@ func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (int, int, er
 
 	migration.Logger.Info().Int("version", lastVersion).Msg("current database version")
 
-	if bmf := cnf.BeforeMigrationsFunc; bmf != nil {
-		bmf(ctx, lastVersion)
-	}
-
 	migrations, err := migration.GetMigrationFiles(cnf.MigrationsDir, lastVersion)
 	if err != nil || len(migrations) == 0 { // Exit early if nothing to do
 		if l := migration.Logger.Info(); len(migrations) == 0 && l.Enabled() {
@@ -165,6 +161,15 @@ func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (int, int, er
 		}
 
 		return lastVersion, lastVersion, err
+	}
+
+	// Lock migration table to avoid race condition.
+	if migration.AcquireLock(ctx); err != nil {
+		return lastVersion, lastVersion, err
+	}
+
+	if bmf := cnf.BeforeMigrationsFunc; bmf != nil {
+		bmf(ctx, lastVersion)
 	}
 
 	newVersion, err := migration.MigrateMultiple(ctx, migrations, lastVersion)
@@ -212,8 +217,7 @@ func (m *Migrator) prepareDB(ctx context.Context) error {
 		return err
 	}
 
-	// Lock the migration table, so that operations from other connections are blocked
-	return m.AcquireLock(ctx)
+	return nil
 }
 
 // GetMigrationFiles will return sorted slice of migration files that should be executed.
