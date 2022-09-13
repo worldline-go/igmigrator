@@ -21,8 +21,37 @@ Example of correct file names:
 
 Without a number, it will be assumed `-1`.
 
-`MigrationsDir` get data from environment variable `IGMIGRATOR_MIGRATION_DIR` and default value is `migrations`  
-`MigrationTable` get data from environment variable `IGMIGRATION_MIGRATION_TABLE` and default value is `migration`
+---
+
+## Configuration
+ The library can be configured  through the  following parameters:
+- **MigrationsDir**: provide a directory that will hold the migration files. It can be set via environment variable `IGMIGRATOR_MIGRATION_DIR` and default value is `migrations`.
+- **Schema**: can specify which schema(using `set search_path`) should be used to run migrations in.
+- **MigrationTable**: the name of the migration table. It can be set via environment variable `IGMIGRATION_MIGRATION_TABLE` and default value is `migration`.
+- **BeforeMigrationsFunc**: define a function that is executed once and only once before migrations start.
+- **AfterSingleMigrationFunc**: define a function that is executed after each and every single file migration.
+- **AfterAllMigrationsFunc**: define a function that is executed once and only once at the end of the migration process.
+
+---
+
+## Testing
+
+Unit tests are implemented to cover most of the use cases. Some of them requires to have a postgres database up and running.
+
+```shell 
+docker run --rm -it -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:12.8-alpine
+```
+
+If the database is running and reachable on the default (_5432_) port for _postgres_ user (no password), we can simply run the tests by running the following command in root directory:
+```shell
+go test -v ./...
+```
+
+with coverage
+
+```shell
+go test -cover ./... 
+```
 
 ---
 
