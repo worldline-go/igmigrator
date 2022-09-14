@@ -1,6 +1,14 @@
 name: Test
 
-on: [push, pull_request]
+on:
+  push:
+    tags:
+      - v*
+    branches:
+      - master
+      - main
+      - init
+  pull_request:
 
 jobs:
   test:
@@ -8,7 +16,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres
+        image: postgres:12.8-alpine
         env:
           POSTGRES_HOST_AUTH_METHOD=trust
         options: >-
