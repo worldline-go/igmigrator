@@ -39,7 +39,7 @@ Without a number, it will be assumed `-1`.
 Unit tests are implemented to cover most of the use cases. Some of them requires to have a postgres database up and running.
 
 ```shell 
-docker run --rm -it -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:12.8-alpine
+docker run --rm -it -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres postgres:12.8-alpine
 ```
 
 If the database is running and reachable on the default (_5432_) port for _postgres_ user (no password), we can simply run the tests by running the following command in root directory:
