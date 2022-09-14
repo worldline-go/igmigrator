@@ -33,7 +33,7 @@ jobs:
 
       - name: Run coverage
         env:
-          - POSTGRES_PASS=postgres
+          POSTGRES_PASS=postgres
         run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
       - name: Upload coverage to Codecov
         run: bash <(curl -s https://codecov.io/bash)
