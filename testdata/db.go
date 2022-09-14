@@ -26,6 +26,10 @@ func PrepareDB() (*sqlx.DB, string, func()) {
 		if postgresUser == "" {
 			postgresUser = "postgres"
 		}
+
+		if postgresPass == "" {
+			postgresUser = "postgres"
+		}
 	})
 
 	db := sqlx.MustConnect("pgx", fmt.Sprintf("postgres://%s:%s@%s:5432/", postgresUser, postgresPass, postgresHost))
