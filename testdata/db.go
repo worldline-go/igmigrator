@@ -20,19 +20,11 @@ var (
 func PrepareDB() (*sqlx.DB, string, func()) {
 	once.Do(func() {
 		if postgresHost == "" {
-			postgresHost = "localhost"
-		}
-
-		if postgresUser == "" {
-			postgresUser = "postgres"
-		}
-
-		if postgresPass == "" {
-			postgresUser = "postgres"
+			postgresHost = "postgres://postgres@localhost:5432/"
 		}
 	})
 
-	db := sqlx.MustConnect("pgx", fmt.Sprintf("postgres://%s:%s@%s:5432/postgres", postgresUser, postgresPass, postgresHost))
+	db := sqlx.MustConnect("pgx", postgresHost)
 
 	schemaName := fmt.Sprintf("igmigrator_%d", atomic.AddInt32(&schemaCount, 1))
 
