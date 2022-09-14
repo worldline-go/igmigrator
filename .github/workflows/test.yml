@@ -8,7 +8,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:12.8-alpine
+        image: postgres
         env:
           POSTGRES_HOST_AUTH_METHOD=trust
         options: >-
