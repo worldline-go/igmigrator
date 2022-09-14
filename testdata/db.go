@@ -12,8 +12,6 @@ import (
 var (
 	schemaCount  int32
 	postgresHost = os.Getenv("POSTGRES_HOST")
-	postgresUser = os.Getenv("POSTGRES_USER")
-	postgresPass = os.Getenv("POSTGRES_PASS")
 	once         sync.Once
 )
 
@@ -24,7 +22,7 @@ func PrepareDB() (*sqlx.DB, string, func()) {
 		}
 	})
 
-	db := sqlx.MustConnect("pgx", postgresHost)
+	db := sqlx.MustConnect("pgx", "postgres://postgres:postgres@localhost:5432/")
 
 	schemaName := fmt.Sprintf("igmigrator_%d", atomic.AddInt32(&schemaCount, 1))
 
