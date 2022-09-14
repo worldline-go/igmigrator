@@ -32,7 +32,7 @@ func PrepareDB() (*sqlx.DB, string, func()) {
 		}
 	})
 
-	db := sqlx.MustConnect("pgx", fmt.Sprintf("postgres://%s:%s@%s:5432/", postgresUser, postgresPass, postgresHost))
+	db := sqlx.MustConnect("pgx", fmt.Sprintf("postgres://%s:%s@%s:5432/postgres", postgresUser, postgresPass, postgresHost))
 
 	schemaName := fmt.Sprintf("igmigrator_%d", atomic.AddInt32(&schemaCount, 1))
 
