@@ -22,7 +22,7 @@ func PrepareDB() (*sqlx.DB, string, func()) {
 		}
 	})
 
-	db := sqlx.MustConnect("pgx", fmt.Sprintf("postgres://postgres@%s:5432/", postgresHost))
+	db := sqlx.MustConnect("pgx", fmt.Sprintf("postgres://postgres:postgres@%s:5432/", postgresHost))
 
 	schemaName := fmt.Sprintf("igmigrator_%d", atomic.AddInt32(&schemaCount, 1))
 
