@@ -42,7 +42,7 @@ Unit tests are implemented to cover most of the use cases. Some of them requires
 docker run --rm -it -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres postgres:12.8-alpine
 ```
 
-If the database is running and reachable on the default (_5432_) port for _postgres_ user (no password), we can simply run the tests by running the following command in root directory:
+If the database is running and reachable on the default (_5432_) port for _postgres_ user (password _postgres_), we can simply run the tests by running the following command in root directory:
 ```shell
 go test -v ./...
 ```
@@ -71,7 +71,7 @@ log.Logger = zerolog.New(zerolog.ConsoleWriter{
 
 ctx := log.Logger.WithContext(context.Background())
 
-db, err := sqlx.Connect("pgx", "postgres://postgres@localhost:5432/postgres")
+db, err := sqlx.Connect("pgx", "postgres://postgres:postgres@localhost:5432/postgres")
 if err != nil {
     log.Error().Msgf("migrate database connect: %v", err)
     return
