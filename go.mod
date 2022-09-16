@@ -1,4 +1,4 @@
-module gitlab.test.igdcs.com/finops/nextgen/utils/db/igmigrator.git
+module github.com/worldline-go/igmigrator.git
 
 go 1.14
 
