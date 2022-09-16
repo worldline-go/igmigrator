@@ -71,7 +71,7 @@ log.Logger = zerolog.New(zerolog.ConsoleWriter{
 
 ctx := log.Logger.WithContext(context.Background())
 
-db, err := sqlx.Connect("pgx", "postgres://postgres:postgres@localhost:5432/postgres")
+db, err := sqlx.Connect("pgx", "postgres://postgres@localhost:5432/postgres")
 if err != nil {
     log.Error().Msgf("migrate database connect: %v", err)
     return
