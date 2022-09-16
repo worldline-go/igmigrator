@@ -1,4 +1,4 @@
-module github.com/worldline-go/igmigrator.git
+module github.com/worldline-go/igmigrator
 
 go 1.14
 

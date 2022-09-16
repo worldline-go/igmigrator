@@ -11,7 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/worldline-go/igmigrator.git/testdata"
+	"github.com/worldline-go/igmigrator/testdata"
 )
 
 type tableStruct struct {
