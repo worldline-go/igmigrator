@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	_ "github.com/jackc/pgx/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,6 +73,7 @@ func TestMigrations(t *testing.T) {
 		ErrorFunc        func(*testing.T, error)
 		ValidateVersFunc func(t *testing.T, prev int, current int)
 		ValidateFunc     func(t *testing.T, db *sqlx.DB, conf *Config)
+		Values           map[string]string
 	}{
 		{
 			Path: "normal",
@@ -96,6 +97,9 @@ func TestMigrations(t *testing.T) {
 					{Version: 2},
 					{Version: 3},
 				})
+			},
+			Values: map[string]string{
+				"TABLE_DUMMY": "dummy",
 			},
 		},
 		{
@@ -155,7 +159,7 @@ func TestMigrations(t *testing.T) {
 		{
 			Path: "invalid_middle_migration",
 			ErrorFunc: func(t *testing.T, err error) {
-				assert.Equal(t, "ERROR: syntax error at or near \"and\" (SQLSTATE 42601)", err.Error())
+				assert.Equal(t, `failed migration on testdata/invalid_middle_migration/2_install_pos.sql version 2: ERROR: syntax error at or near "and" (SQLSTATE 42601)`, err.Error())
 			},
 			ValidateVersFunc: func(t *testing.T, prev int, current int) {
 				assert.Equal(t, 0, prev)
@@ -176,7 +180,7 @@ func TestMigrations(t *testing.T) {
 			db, schemaName, cleanup := testdata.PrepareDB()
 			defer cleanup()
 
-			conf := &Config{MigrationsDir: testdata.Path(test.Path), Schema: schemaName}
+			conf := &Config{MigrationsDir: testdata.Path(test.Path), Schema: schemaName, Values: test.Values}
 			conf.SetDefaults()
 
 			if test.ConfigFunc != nil {

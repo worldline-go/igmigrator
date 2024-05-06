@@ -36,6 +36,9 @@ type Config struct {
 	// AfterAllMigrationsFunc will be executed when all migrations were executed successfully.
 	// It will not be called if any error happened.
 	AfterAllMigrationsFunc
+
+	// Values for expand function in migration files.
+	Values map[string]string
 }
 
 // SetDefaults will update missing values with default ones(if any).

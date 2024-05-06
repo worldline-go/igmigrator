@@ -1,4 +1,4 @@
-# IGMigrator
+# igmigrator
 
 This tool get list of sql files in a folder and apply them with recording last migrationed file's version to remember in future updates as new files comes.
 

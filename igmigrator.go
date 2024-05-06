@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"regexp"
@@ -63,7 +62,7 @@ type Migrator struct {
 // If transaction should be used - use MigrateInTx
 //
 // This function returns version before and after migration.
-func Migrate(ctx context.Context, db DB, config *Config) (previousVersion, newVersion int, err error) {
+func Migrate(ctx context.Context, db DB, cnf *Config) (previousVersion, newVersion int, err error) {
 	var tx interface {
 		Transaction
 		driver.Tx
@@ -74,7 +73,7 @@ func Migrate(ctx context.Context, db DB, config *Config) (previousVersion, newVe
 		return 0, 0, err
 	}
 
-	previousVersion, newVersion, err = MigrateInTx(ctx, tx, config)
+	previousVersion, newVersion, err = MigrateInTx(ctx, tx, cnf)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return previousVersion, newVersion, fmt.Errorf("%w, also rollback error: %s", err, rollbackErr.Error())
@@ -87,7 +86,7 @@ func Migrate(ctx context.Context, db DB, config *Config) (previousVersion, newVe
 		return previousVersion, previousVersion, err
 	}
 
-	if aam := config.AfterAllMigrationsFunc; aam != nil {
+	if aam := cnf.AfterAllMigrationsFunc; aam != nil {
 		aam(ctx, previousVersion, newVersion)
 	}
 
@@ -216,7 +215,7 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 		newVersion = VersionFromFile(fileName)
 
 		if err := m.MigrateSingle(ctx, filePath); err != nil {
-			return lastVersion, err
+			return lastVersion, fmt.Errorf("failed migration on %s version %d: %w", filePath, newVersion, err)
 		}
 
 		if err := m.InsertNewVersion(ctx, newVersion); err != nil {
@@ -226,7 +225,7 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 		// This single migrations should not be point of interest in most cases.
 		m.Logger.Debug().Int("migrated_to", newVersion).
 			Str("migration_path", filePath).
-			Msg("run migration")
+			Msg("success run migration")
 
 		if am := m.Cnf.AfterSingleMigrationFunc; am != nil {
 			am(ctx, filePath, newVersion)
@@ -239,12 +238,17 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 // MigrateSingle executes a single migration.
 // It does not increase version in migration table.
 func (m *Migrator) MigrateSingle(ctx context.Context, filePath string) error {
-	migration, err := ioutil.ReadFile(filePath)
+	migration, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
 
-	_, err = m.Tx.ExecContext(ctx, string(migration))
+	migrationStr := string(migration)
+	if len(m.Cnf.Values) > 0 {
+		migrationStr = os.Expand(string(migration), mapToFunc(m.Cnf.Values))
+	}
+
+	_, err = m.Tx.ExecContext(ctx, migrationStr)
 
 	return err
 }
@@ -306,4 +310,10 @@ func VersionFromFile(fileName string) int {
 	}
 
 	return version
+}
+
+func mapToFunc(values map[string]string) func(string) string {
+	return func(key string) string {
+		return values[key]
+	}
 }
