@@ -283,13 +283,13 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 			return lastVersion, fmt.Errorf("failed migration on %s version %d: %w", filePath, newVersion, err)
 		}
 
-		pathColumn := getPath(fileName)
-		if err := m.InsertNewVersion(ctx, pathColumn, newVersion); err != nil {
+		directoryPath := getPath(fileName)
+		if err := m.InsertNewVersion(ctx, directoryPath, newVersion); err != nil {
 			return lastVersion, err
 		}
 
 		// This single migrations should not be point of interest in most cases.
-		m.Logger.Debug("success run migration", "migrated_to", newVersion, "path", pathColumn, "migration_path", filePath)
+		m.Logger.Debug("success run migration", "migrated_to", newVersion, "path", directoryPath, "migration_path", filePath)
 
 		if am := m.Cnf.AfterSingleMigrationFunc; am != nil {
 			am(ctx, filePath, newVersion)
@@ -318,8 +318,8 @@ func (m *Migrator) MigrateSingle(ctx context.Context, filePath string) error {
 }
 
 // InsertNewVersion adds new migration version to migration table.
-func (m *Migrator) InsertNewVersion(ctx context.Context, path string, version int) error {
-	_, err := m.Tx.ExecContext(ctx, "INSERT INTO "+m.MigrationTable()+"(path, version) VALUES ($1, $2)", path, version)
+func (m *Migrator) InsertNewVersion(ctx context.Context, directoryPath string, version int) error {
+	_, err := m.Tx.ExecContext(ctx, "INSERT INTO "+m.MigrationTable()+"(path, version) VALUES ($1, $2)", directoryPath, version)
 
 	return err
 }
@@ -337,10 +337,9 @@ func (m *Migrator) CreateMigrationTable(ctx context.Context) error {
 }
 
 // GetLastVersion returns the latest migration version.
-func (m *Migrator) GetLastVersion(ctx context.Context, path string) (int, error) {
+func (m *Migrator) GetLastVersion(ctx context.Context, directoryPath string) (int, error) {
 	var lastVersion sql.NullInt64
-	//nolint:gosec // m.Cnf.MigrationTable is cleaned up to have only ASCII letters, numbers and '_'.
-	err := m.Tx.QueryRowContext(ctx, "SELECT MAX(version) FROM "+m.MigrationTable()+" WHERE path = $1", path).Scan(&lastVersion)
+	err := m.Tx.QueryRowContext(ctx, "SELECT MAX(version) FROM "+m.MigrationTable()+" WHERE path = $1", directoryPath).Scan(&lastVersion)
 
 	return int(lastVersion.Int64), err
 }
