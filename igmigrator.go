@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/worldline-go/logz"
 )
 
@@ -114,7 +115,15 @@ func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (*MigrateResu
 	migration := Migrator{
 		Cnf:    cnf,
 		Tx:     tx,
-		Logger: logz.AdapterKV{Log: *zerolog.Ctx(ctx)},
+		Logger: cnf.Logger,
+	}
+
+	if migration.Logger == nil {
+		if zlog := zerolog.Ctx(ctx); zlog != nil {
+			migration.Logger = logz.AdapterKV{Log: *zlog, Caller: true}
+		} else {
+			migration.Logger = logz.AdapterKV{Log: log.Logger, Caller: true}
+		}
 	}
 
 	if err := migration.SetSchema(ctx); err != nil {

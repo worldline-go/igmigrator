@@ -4,6 +4,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/worldline-go/logz"
 )
 
 // Config provides a way to specify some optional configuration.
@@ -39,6 +41,8 @@ type Config struct {
 
 	// Values for expand function in migration files.
 	Values map[string]string
+
+	Logger logz.Adapter
 }
 
 // SetDefaults will update missing values with default ones(if any).
