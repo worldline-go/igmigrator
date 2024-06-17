@@ -244,7 +244,7 @@ func TestMigrations(t *testing.T) {
 			if test.ValidateVersFunc != nil {
 				v := MigrateResultVersion{}
 				if result != nil {
-					v, _ = result.Path["/"]
+					v = result.Path["/"]
 				}
 
 				test.ValidateVersFunc(t, v.PrevVersion, v.NewVersion)
@@ -407,7 +407,7 @@ func TestMigrate_Locking(t *testing.T) {
 
 			v := MigrateResultVersion{}
 			if result != nil {
-				v, _ = result.Path["/"]
+				v = result.Path["/"]
 			}
 			require.NoError(t, err)
 			require.Equal(t, scenario.prev, v.PrevVersion)

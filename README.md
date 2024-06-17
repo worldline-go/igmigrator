@@ -1,5 +1,11 @@
 # igmigrator
 
+[![License](https://img.shields.io/github/license/worldline-go/igmigrator?color=red&style=flat-square)](https://raw.githubusercontent.com/worldline-go/igmigrator/main/LICENSE)
+[![Coverage](https://img.shields.io/sonar/coverage/worldline-go_igmigrator?logo=sonarcloud&server=https%3A%2F%2Fsonarcloud.io&style=flat-square)](https://sonarcloud.io/summary/overall?id=worldline-go_igmigrator)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/worldline-go/igmigrator/test.yml?branch=main&logo=github&style=flat-square&label=ci)](https://github.com/worldline-go/igmigrator/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/worldline-go/igmigrator?style=flat-square)](https://goreportcard.com/report/github.com/worldline-go/igmigrator)
+[![Go PKG](https://raw.githubusercontent.com/worldline-go/guide/main/badge/custom/reference.svg)](https://pkg.go.dev/github.com/worldline-go/igmigrator)
+
 This tool get list of sql files in a folder and apply them with recording last migrationed file's version to remember in future updates as new files comes.
 
 ```sh
