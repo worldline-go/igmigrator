@@ -1,13 +1,14 @@
-module github.com/worldline-go/igmigrator
+module github.com/worldline-go/igmigrator/v2
 
 go 1.19
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.0
-	github.com/jackc/pgx/v5 v5.5.5
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/jackc/pgx/v5 v5.6.0
 	github.com/jmoiron/sqlx v1.4.0
-	github.com/rs/zerolog v1.32.0
-	github.com/stretchr/testify v1.8.1
+	github.com/rs/zerolog v1.33.0
+	github.com/stretchr/testify v1.9.0
+	github.com/worldline-go/logz v0.5.0
 )
 
 require (

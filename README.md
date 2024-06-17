@@ -3,7 +3,7 @@
 This tool get list of sql files in a folder and apply them with recording last migrationed file's version to remember in future updates as new files comes.
 
 ```sh
-go get github.com/worldline-go/igmigrator
+go get github.com/worldline-go/igmigrator/v2
 ```
 
 Example `testdata/normal` folder has 2 file that file names are `1-test.sql` and `5-test2.sql`. After run the migration tool related migration table record last number which is 5 in our case. So next run folder will check again and apply sql files which is has number bigger than 5.
@@ -19,7 +19,7 @@ Example of correct file names:
 103alteruser.sql
 ```
 
-Without a number, it will be assumed `-1`.
+Without a number start, it will be assumed `-1` and it is skipped in `DefaultMigrationFileSkipper`.
 
 ---
 
@@ -34,43 +34,11 @@ Without a number, it will be assumed `-1`.
 
 ---
 
-## Testing
-
-Unit tests are implemented to cover most of the use cases. Some of them requires to have a postgres database up and running.
-
-```shell 
-docker run --rm -it -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres postgres:12.8-alpine
-```
-
-If the database is running and reachable on the default (_5432_) port for _postgres_ user (password _postgres_), we can simply run the tests by running the following command in root directory:
-```shell
-go test -v ./...
-```
-
-with coverage
-
-```shell
-go test -coverprofile=cover.out -covermode=atomic ./...
-```
-
----
-
 ## Example Usage
 
 ```go
 // For demo postgres database
-// docker run --rm -it -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:12.8-alpine
-
-log.Logger = zerolog.New(zerolog.ConsoleWriter{
-    Out:     os.Stdout,
-    NoColor: true,
-    FormatTimestamp: func(i interface{}) string {
-        return ""
-    },
-}).With().CallerWithSkipFrameCount(2).Logger()
-
-ctx := log.Logger.WithContext(context.Background())
-
+// docker run --rm -it -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:14.12-alpine
 db, err := sqlx.Connect("pgx", "postgres://postgres@localhost:5432/postgres")
 if err != nil {
     log.Error().Msgf("migrate database connect: %v", err)
@@ -90,4 +58,40 @@ igmigrator.Migrate(ctx, db, &igmigrator.Config{
 // TRC igmigrator.go:266 > run one migration migrated_to=1 migration_path=testdata/normal/1_install_table.sql
 // TRC igmigrator.go:266 > run one migration migrated_to=2 migration_path=testdata/normal/2_install_pos.sql
 // TRC igmigrator.go:266 > run one migration migrated_to=3 migration_path=testdata/normal/3_install_test.sql
+```
+
+---
+
+## Testing
+
+Unit tests are implemented to cover most of the use cases. Some of them requires to have a postgres database up and running.
+
+```shell 
+docker run --rm -it -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres postgres:14.12-alpine
+```
+
+If the database is running and reachable on the default (_5432_) port for _postgres_ user (password _postgres_), we can simply run the tests by running the following command in root directory:
+```shell
+go test -v ./...
+```
+
+with coverage
+
+```shell
+go test -coverprofile=cover.out -covermode=atomic ./...
+```
+
+## Migrate v1 -> v2
+
+v2 checking the path and should be exist if migration table already exist.
+
+```sql
+-- This SQL statement adds a new column 'path' to the existing table
+ALTER TABLE <TABLE> ADD COLUMN path VARCHAR(1000) NOT NULL DEFAULT '/';
+
+-- This SQL statement drops the primary key constraint on the 'version' column, usually named '<TABLE>_pkey'
+ALTER TABLE <TABLE> DROP CONSTRAINT IF EXISTS <primary_key_name>;
+
+-- This SQL statement creates a new primary key constraint on both 'path' and 'version' columns
+ALTER TABLE <TABLE> ADD PRIMARY KEY (path, version);
 ```

@@ -7,23 +7,25 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
+	"github.com/worldline-go/logz"
 )
 
 type (
 	BeforeMigrationsFunc     func(ctx context.Context, currentVersion int)
 	AfterSingleMigrationFunc func(ctx context.Context, filePath string, newVersion int)
-	AfterAllMigrationsFunc   func(ctx context.Context, previousVersion, newVersion int)
+	AfterAllMigrationsFunc   func(ctx context.Context, result *MigrateResult)
 )
 
 // DefaultMigrationFileSkipper defines default behavior for skipping migration files.
 // File will be skipped if it is a directory, does not have suffix ".sql" or does not have version suffix.
-var DefaultMigrationFileSkipper = func(file os.FileInfo, currentVersion int) bool {
+func DefaultMigrationFileSkipper(file os.FileInfo, currentVersion int) bool {
 	fileName := file.Name()
 	if file.IsDir() || !strings.HasSuffix(fileName, ".sql") {
 		return true
@@ -53,7 +55,16 @@ type Transaction interface {
 type Migrator struct {
 	Cnf    *Config
 	Tx     Transaction
-	Logger *zerolog.Logger
+	Logger logz.Adapter
+}
+
+type MigrateResult struct {
+	Path map[string]MigrateResultVersion
+}
+
+type MigrateResultVersion struct {
+	PrevVersion int
+	NewVersion  int
 }
 
 // Migrate searches for migration files and runs them. This should be main entry point in most cases.
@@ -62,84 +73,109 @@ type Migrator struct {
 // If transaction should be used - use MigrateInTx
 //
 // This function returns version before and after migration.
-func Migrate(ctx context.Context, db DB, cnf *Config) (previousVersion, newVersion int, err error) {
+func Migrate(ctx context.Context, db DB, cnf *Config) (*MigrateResult, error) {
 	var tx interface {
 		Transaction
 		driver.Tx
 	}
 
-	tx, err = db.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 
-	previousVersion, newVersion, err = MigrateInTx(ctx, tx, cnf)
+	result, err := MigrateInTx(ctx, tx, cnf)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			return previousVersion, newVersion, fmt.Errorf("%w, also rollback error: %s", err, rollbackErr.Error())
+			return nil, fmt.Errorf("%w, also rollback error: %s", err, rollbackErr.Error())
 		}
 
-		return previousVersion, newVersion, err
+		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return previousVersion, previousVersion, err
+		return nil, err
 	}
 
 	if aam := cnf.AfterAllMigrationsFunc; aam != nil {
-		aam(ctx, previousVersion, newVersion)
+		aam(ctx, result)
 	}
 
-	return previousVersion, newVersion, nil
+	return result, nil
 }
 
 // MigrateInTx will run SQL files in sequence till the latest version. Generally Migrate should be used instead.
 //
 // This function MUST operate on transaction! If plain database connection will be provided - it will return error.
 // This function will do only DB queries, which means that no transaction stuff will be used.
-func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (int, int, error) {
+func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (*MigrateResult, error) {
 	cnf.SetDefaults()
 
 	migration := Migrator{
 		Cnf:    cnf,
 		Tx:     tx,
-		Logger: zerolog.Ctx(ctx),
+		Logger: logz.AdapterKV{Log: *zerolog.Ctx(ctx)},
 	}
 
 	if err := migration.SetSchema(ctx); err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 
 	if err := migration.prepareDB(ctx); err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 
-	lastVersion, err := migration.GetLastVersion(ctx)
+	// get dirs
+	dirs, err := migration.GetDirs(cnf.MigrationsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &MigrateResult{Path: make(map[string]MigrateResultVersion)}
+	for _, dir := range dirs {
+		previousVersion, newVersion, err := migrateInTxDir(ctx, &migration, dir)
+		if err != nil {
+			return nil, err
+		}
+
+		result.Path[dir] = MigrateResultVersion{
+			PrevVersion: previousVersion,
+			NewVersion:  newVersion,
+		}
+	}
+
+	return result, nil
+}
+
+func migrateInTxDir(ctx context.Context, m *Migrator, dir string) (int, int, error) {
+	lastVersion, err := m.GetLastVersion(ctx, dir)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	migration.Logger.Info().Int("version", lastVersion).Msg("current database version")
+	m.Logger.Info("current database version", "version", lastVersion)
 
-	migrations, err := migration.GetMigrationFiles(cnf.MigrationsDir, lastVersion)
+	migrations, err := m.GetMigrationFiles(path.Join(m.Cnf.MigrationsDir, dir), lastVersion)
 	if err != nil || len(migrations) == 0 { // Exit early if nothing to do
-		if l := migration.Logger.Info(); len(migrations) == 0 && l.Enabled() {
-			l.Msg("database is up to date")
-		}
+		m.Logger.Info("database is up to date", "path", dir)
 
 		return lastVersion, lastVersion, err
+	}
+
+	for i := range migrations {
+		migrations[i] = path.Join(dir, migrations[i])
 	}
 
 	// Lock migration table to avoid race condition.
-	if err := migration.AcquireLock(ctx); err != nil {
+	if err := m.AcquireLock(ctx); err != nil {
 		return lastVersion, lastVersion, err
 	}
 
-	if bmf := cnf.BeforeMigrationsFunc; bmf != nil {
+	if bmf := m.Cnf.BeforeMigrationsFunc; bmf != nil {
 		bmf(ctx, lastVersion)
 	}
 
-	newVersion, err := migration.MigrateMultiple(ctx, migrations, lastVersion)
+	newVersion, err := m.MigrateMultiple(ctx, migrations, lastVersion)
 	if err != nil {
 		return lastVersion, lastVersion, err
 	}
@@ -155,7 +191,36 @@ func (m *Migrator) prepareDB(ctx context.Context) error {
 		return err
 	}
 
+	// Migrate versions of igmigrator itself
+
 	return nil
+}
+
+func (m *Migrator) GetDirs(migrationDir string) ([]string, error) {
+	dirs := []string{}
+	if err := filepath.Walk(migrationDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			dirs = append(dirs, path) // Add directory path to slice
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	for i := range dirs {
+		v := strings.TrimPrefix(dirs[i], migrationDir)
+		if !strings.HasPrefix(v, "/") {
+			v = "/" + v
+		}
+
+		dirs[i] = v
+	}
+
+	return dirs, nil
 }
 
 // GetMigrationFiles will return sorted slice of migration files that should be executed.
@@ -212,20 +277,19 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 
 	for _, fileName := range migrations {
 		filePath := path.Join(m.Cnf.MigrationsDir, fileName)
-		newVersion = VersionFromFile(fileName)
+		newVersion = VersionFromFile(filepath.Base(fileName))
 
 		if err := m.MigrateSingle(ctx, filePath); err != nil {
 			return lastVersion, fmt.Errorf("failed migration on %s version %d: %w", filePath, newVersion, err)
 		}
 
-		if err := m.InsertNewVersion(ctx, newVersion); err != nil {
+		pathColumn := getPath(fileName)
+		if err := m.InsertNewVersion(ctx, pathColumn, newVersion); err != nil {
 			return lastVersion, err
 		}
 
 		// This single migrations should not be point of interest in most cases.
-		m.Logger.Debug().Int("migrated_to", newVersion).
-			Str("migration_path", filePath).
-			Msg("success run migration")
+		m.Logger.Debug("success run migration", "migrated_to", newVersion, "path", pathColumn, "migration_path", filePath)
 
 		if am := m.Cnf.AfterSingleMigrationFunc; am != nil {
 			am(ctx, filePath, newVersion)
@@ -254,8 +318,8 @@ func (m *Migrator) MigrateSingle(ctx context.Context, filePath string) error {
 }
 
 // InsertNewVersion adds new migration version to migration table.
-func (m *Migrator) InsertNewVersion(ctx context.Context, version int) error {
-	_, err := m.Tx.ExecContext(ctx, "insert into "+m.MigrationTable()+"(version) values ($1)", version)
+func (m *Migrator) InsertNewVersion(ctx context.Context, path string, version int) error {
+	_, err := m.Tx.ExecContext(ctx, "INSERT INTO "+m.MigrationTable()+"(path, version) VALUES ($1, $2)", path, version)
 
 	return err
 }
@@ -263,18 +327,20 @@ func (m *Migrator) InsertNewVersion(ctx context.Context, version int) error {
 // CreateMigrationTable creates the migration table if not present.
 func (m *Migrator) CreateMigrationTable(ctx context.Context) error {
 	_, err := m.Tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+m.MigrationTable()+` (
-		version     INT PRIMARY KEY,
-		migrated_on	 	TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		path        VARCHAR(1000) NOT NULL DEFAULT '/',
+		version     INT,
+		migrated_on	TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (path, version)
 	)`)
 
 	return err
 }
 
 // GetLastVersion returns the latest migration version.
-func (m *Migrator) GetLastVersion(ctx context.Context) (int, error) {
+func (m *Migrator) GetLastVersion(ctx context.Context, path string) (int, error) {
 	var lastVersion sql.NullInt64
 	//nolint:gosec // m.Cnf.MigrationTable is cleaned up to have only ASCII letters, numbers and '_'.
-	err := m.Tx.QueryRowContext(ctx, "SELECT MAX(version) FROM "+m.MigrationTable()).Scan(&lastVersion)
+	err := m.Tx.QueryRowContext(ctx, "SELECT MAX(version) FROM "+m.MigrationTable()+" WHERE path = $1", path).Scan(&lastVersion)
 
 	return int(lastVersion.Int64), err
 }
@@ -316,4 +382,18 @@ func mapToFunc(values map[string]string) func(string) string {
 	return func(key string) string {
 		return values[key]
 	}
+}
+
+func getPath(filePath string) string {
+	v := filepath.Dir(filePath)
+
+	if v == "." {
+		return "/"
+	}
+
+	if strings.HasPrefix(v, "/") {
+		return v
+	}
+
+	return "/" + v
 }

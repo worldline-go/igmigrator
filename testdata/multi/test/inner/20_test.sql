@@ -1,0 +1,1 @@
+ALTER TABLE test_table_3 ADD COLUMN age INT;

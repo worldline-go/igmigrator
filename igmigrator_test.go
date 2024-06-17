@@ -3,15 +3,18 @@ package igmigrator
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/worldline-go/igmigrator/testdata"
+
+	"github.com/worldline-go/igmigrator/v2/testdata"
 )
 
 type tableStruct struct {
@@ -20,8 +23,16 @@ type tableStruct struct {
 }
 
 type migrationData struct {
+	Path       string    `db:"path"`
 	Version    int       `db:"version"`
 	MigratedOn time.Time `db:"migrated_on"`
+}
+
+func TestMain(m *testing.M) {
+	v := zerolog.New(os.Stderr)
+	zerolog.DefaultContextLogger = &v
+
+	m.Run()
 }
 
 func TestSetSchema(t *testing.T) {
@@ -88,14 +99,15 @@ func TestMigrations(t *testing.T) {
 					{"dummy", "dummy_col"},
 					{"latest", "col1"},
 					{"migration", "migrated_on"},
+					{"migration", "path"},
 					{"migration", "version"},
 				})
 
 				// Check if all migrations were written to MigrationTable
 				assertMigrations(t, db, conf.MigrationTable, []migrationData{
-					{Version: 1},
-					{Version: 2},
-					{Version: 3},
+					{Path: "/", Version: 1},
+					{Path: "/", Version: 2},
+					{Path: "/", Version: 3},
 				})
 			},
 			Values: map[string]string{
@@ -113,6 +125,7 @@ func TestMigrations(t *testing.T) {
 					{"another", "id"},
 					{"another", "purchased_at"},
 					{"migration", "migrated_on"},
+					{"migration", "path"},
 					{"migration", "version"},
 					{"test", "created_at"},
 					{"test", "description"},
@@ -121,11 +134,43 @@ func TestMigrations(t *testing.T) {
 				})
 
 				assertMigrations(t, db, conf.MigrationTable, []migrationData{
-					{Version: 1},
-					{Version: 2},
-					{Version: 3},
-					{Version: 10},
-					{Version: 21},
+					{Path: "/", Version: 1},
+					{Path: "/", Version: 2},
+					{Path: "/", Version: 3},
+					{Path: "/", Version: 10},
+					{Path: "/", Version: 21},
+				})
+			},
+		},
+		{
+			Path: "multi",
+			ValidateVersFunc: func(t *testing.T, prev int, current int) {
+				assert.Equal(t, 0, prev)
+				assert.Equal(t, 2, current)
+			},
+			ValidateFunc: func(t *testing.T, db *sqlx.DB, conf *Config) {
+				assertTables(t, db, conf.Schema, []tableStruct{
+					{"migration", "migrated_on"},
+					{"migration", "path"},
+					{"migration", "version"},
+					{"test_table_1", "id"},
+					{"test_table_1", "name"},
+					{"test_table_2", "age"},
+					{"test_table_2", "id"},
+					{"test_table_2", "name"},
+					{"test_table_3", "age"},
+					{"test_table_3", "id"},
+					{"test_table_3", "middle_name"},
+					{"test_table_3", "name"},
+				})
+
+				assertMigrations(t, db, conf.MigrationTable, []migrationData{
+					{Path: "/", Version: 2},
+					{Path: "/test", Version: 1},
+					{Path: "/test", Version: 10},
+					{Path: "/test/inner", Version: 1},
+					{Path: "/test/inner", Version: 20},
+					{Path: "/test/inner", Version: 30},
 				})
 			},
 		},
@@ -135,17 +180,21 @@ func TestMigrations(t *testing.T) {
 				m := Migrator{Tx: db, Cnf: conf}
 				assert.NoError(t, m.CreateMigrationTable(context.Background()))
 
-				assert.NoError(t, m.InsertNewVersion(context.Background(), 2))
+				assert.NoError(t, m.InsertNewVersion(context.Background(), "/", 2))
 			},
 			ValidateVersFunc: func(t *testing.T, prev int, current int) {
 				assert.Equal(t, 2, prev)
 				assert.Equal(t, 3, current)
 			},
 			ValidateFunc: func(t *testing.T, db *sqlx.DB, conf *Config) {
-				assertMigrations(t, db, conf.MigrationTable, []migrationData{{Version: 2}, {Version: 3}})
+				assertMigrations(t, db, conf.MigrationTable, []migrationData{
+					{Path: "/", Version: 2},
+					{Path: "/", Version: 3},
+				})
 				assertTables(t, db, conf.Schema, []tableStruct{
 					{"dummy", "dummy_col"},
 					{"migration", "migrated_on"},
+					{"migration", "path"},
 					{"migration", "version"},
 				})
 			},
@@ -191,10 +240,14 @@ func TestMigrations(t *testing.T) {
 				test.PrepareFunc(t, db, conf)
 			}
 
-			prev, current, err := Migrate(context.Background(), db, conf)
-
+			result, err := Migrate(context.Background(), db, conf)
 			if test.ValidateVersFunc != nil {
-				test.ValidateVersFunc(t, prev, current)
+				v := MigrateResultVersion{}
+				if result != nil {
+					v, _ = result.Path["/"]
+				}
+
+				test.ValidateVersFunc(t, v.PrevVersion, v.NewVersion)
 			}
 
 			if test.ErrorFunc != nil {
@@ -224,12 +277,13 @@ func assertMigrations(t *testing.T, db *sqlx.DB, migrationTable string, expected
 	t.Helper()
 
 	var migrations []migrationData
-	require.NoError(t, db.Select(&migrations, "select * from "+migrationTable+" order by version asc"))
+	require.NoError(t, db.Select(&migrations, "select * from "+migrationTable+" order by path, version asc"))
 	require.Len(t, migrations, len(expected))
 
 	for i := range expected {
 		assert.NotEmpty(t, migrations[i].MigratedOn)
 		assert.Equal(t, expected[i].Version, migrations[i].Version)
+		assert.Equal(t, expected[i].Path, migrations[i].Path)
 	}
 }
 
@@ -270,6 +324,13 @@ func TestVersionFromFile(t *testing.T) {
 			},
 			want: 123,
 		},
+		{
+			name: "minus check",
+			args: args{
+				fileName: "-22_testabc1.sql",
+			},
+			want: -1,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -295,7 +356,7 @@ func TestMigrate_Locking(t *testing.T) {
 				mck.ExpectBegin()
 
 				// Create migration table if not exists.
-				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( version INT PRIMARY KEY, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
+				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( path VARCHAR\\(1000\\) NOT NULL DEFAULT '/', version INT, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\), PRIMARY KEY \\(path, version\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
 				// Get actual version.
 				mck.ExpectQuery("SELECT MAX\\(version\\) FROM migration").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(int64(0)))
 				// Lock migration table.
@@ -303,7 +364,7 @@ func TestMigrate_Locking(t *testing.T) {
 				// Apply db schema change.
 				mck.ExpectExec("CREATE TABLE accounts \\( user_id serial PRIMARY KEY, last_login TIMESTAMP \\)").WillReturnResult(sqlmock.NewResult(1, 1))
 				// Update version.
-				mck.ExpectExec("insert into migration\\(version\\) values \\(\\$1\\)").WithArgs(1).WillReturnResult(sqlmock.NewResult(1, 1))
+				mck.ExpectExec("INSERT INTO migration\\(path, version\\) VALUES \\(\\$1, \\$2\\)").WithArgs("/", 1).WillReturnResult(sqlmock.NewResult(1, 1))
 
 				mck.ExpectCommit()
 			},
@@ -318,7 +379,8 @@ func TestMigrate_Locking(t *testing.T) {
 				mck.ExpectBegin()
 
 				// Create migration table if not exists.
-				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( version INT PRIMARY KEY, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
+				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( path VARCHAR\\(1000\\) NOT NULL DEFAULT '/', version INT, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\), PRIMARY KEY \\(path, version\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
+
 				// Get actual version.
 				mck.ExpectQuery("SELECT MAX\\(version\\) FROM migration").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(int64(1)))
 
@@ -341,12 +403,16 @@ func TestMigrate_Locking(t *testing.T) {
 			conf.SetDefaults()
 			conf.MigrationsDir = testdata.Path("locking")
 
-			prev, actual, err := Migrate(context.Background(), db, conf)
+			result, err := Migrate(context.Background(), db, conf)
+
+			v := MigrateResultVersion{}
+			if result != nil {
+				v, _ = result.Path["/"]
+			}
 			require.NoError(t, err)
-			require.Equal(t, scenario.prev, prev)
-			require.Equal(t, scenario.actual, actual)
+			require.Equal(t, scenario.prev, v.PrevVersion)
+			require.Equal(t, scenario.actual, v.NewVersion)
 			require.NoError(t, mck.ExpectationsWereMet())
 		})
 	}
-
 }
