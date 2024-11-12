@@ -162,7 +162,7 @@ func migrateInTxDir(ctx context.Context, m *Migrator, dir string) (int, int, err
 		return 0, 0, err
 	}
 
-	m.Logger.Info("current database version", "version", lastVersion)
+	m.Logger.Info("current database version", "path", dir, "version", lastVersion)
 
 	migrations, err := m.GetMigrationFiles(path.Join(m.Cnf.MigrationsDir, dir), lastVersion)
 	if err != nil || len(migrations) == 0 { // Exit early if nothing to do
@@ -298,7 +298,7 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 		}
 
 		// This single migrations should not be point of interest in most cases.
-		m.Logger.Debug("success run migration", "migrated_to", newVersion, "path", directoryPath, "migration_path", filePath)
+		m.Logger.Info("success run migration", "migrated_to", newVersion, "path", directoryPath, "migration_path", filePath)
 
 		if am := m.Cnf.AfterSingleMigrationFunc; am != nil {
 			am(ctx, filePath, newVersion)
