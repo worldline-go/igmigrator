@@ -20,6 +20,8 @@ type Config struct {
 	// It is possible to set this value from environment variable `IGMIGRATOR_MIGRATION_DIR`
 	// if value for this variable is not set.
 	MigrationsDir string
+	// PreFolders to run before migrations in the migration directory.
+	PreFolders []string
 	// Schema can specify which schema(using `set search_path`) should be used to run migrations in.
 	//
 	// By default, it will not change schema.

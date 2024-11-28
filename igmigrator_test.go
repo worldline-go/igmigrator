@@ -416,3 +416,17 @@ func TestMigrate_Locking(t *testing.T) {
 		})
 	}
 }
+
+func TestMigrate_AddPreFolder(t *testing.T) {
+	m := Migrator{
+		Cnf: &Config{
+			MigrationsDir: "testdata/multi/test",
+			PreFolders:    []string{"/inner"},
+		},
+	}
+
+	v, err := m.GetDirs()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"/inner", "/", "/other"}, v)
+}

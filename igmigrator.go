@@ -98,8 +98,8 @@ func Migrate(ctx context.Context, db DB, cnf *Config) (*MigrateResult, error) {
 		return nil, err
 	}
 
-	if aam := cnf.AfterAllMigrationsFunc; aam != nil {
-		aam(ctx, result)
+	if cnf.AfterAllMigrationsFunc != nil {
+		cnf.AfterAllMigrationsFunc(ctx, result)
 	}
 
 	return result, nil
@@ -135,7 +135,7 @@ func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (*MigrateResu
 	}
 
 	// get dirs
-	dirs, err := migration.GetDirs(cnf.MigrationsDir)
+	dirs, err := migration.GetDirs()
 	if err != nil {
 		return nil, err
 	}
@@ -205,9 +205,9 @@ func (m *Migrator) prepareDB(ctx context.Context) error {
 	return nil
 }
 
-func (m *Migrator) GetDirs(migrationDir string) ([]string, error) {
+func (m *Migrator) GetDirs() ([]string, error) {
 	dirs := []string{}
-	if err := filepath.Walk(migrationDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(m.Cnf.MigrationsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -221,7 +221,7 @@ func (m *Migrator) GetDirs(migrationDir string) ([]string, error) {
 	}
 
 	for i := range dirs {
-		v := strings.TrimPrefix(dirs[i], migrationDir)
+		v := strings.TrimPrefix(dirs[i], m.Cnf.MigrationsDir)
 		if !strings.HasPrefix(v, "/") {
 			v = "/" + v
 		}
@@ -229,7 +229,42 @@ func (m *Migrator) GetDirs(migrationDir string) ([]string, error) {
 		dirs[i] = v
 	}
 
-	return dirs, nil
+	return m.addPreFolders(dirs), nil
+}
+
+func (m *Migrator) addPreFolders(dirs []string) []string {
+	if len(m.Cnf.PreFolders) == 0 {
+		return dirs
+	}
+
+	mapDirs := make(map[string]struct{}, len(dirs))
+	for _, dir := range dirs {
+		mapDirs[dir] = struct{}{}
+	}
+
+	newDirs := make([]string, 0, len(dirs))
+	for _, pre := range m.Cnf.PreFolders {
+		pre := filepath.Clean(pre)
+		if !strings.HasPrefix(pre, "/") {
+			pre = "/" + pre
+		}
+
+		if _, ok := mapDirs[pre]; ok {
+			newDirs = append(newDirs, pre)
+		}
+
+		for _, dir := range newDirs {
+			delete(mapDirs, dir)
+		}
+	}
+
+	for _, dir := range dirs {
+		if _, ok := mapDirs[dir]; ok {
+			newDirs = append(newDirs, dir)
+		}
+	}
+
+	return newDirs
 }
 
 // GetMigrationFiles will return sorted slice of migration files that should be executed.
