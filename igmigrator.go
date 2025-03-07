@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/worldline-go/logz"
 )
+
+var DefaultSkipDirs = []string{"archive"}
 
 type (
 	BeforeMigrationsFunc     func(ctx context.Context, currentVersion int)
@@ -212,6 +215,10 @@ func (m *Migrator) GetDirs() ([]string, error) {
 			return err
 		}
 		if info.IsDir() {
+			if slices.Contains(DefaultSkipDirs, info.Name()) {
+				return filepath.SkipDir
+			}
+
 			dirs = append(dirs, path) // Add directory path to slice
 		}
 

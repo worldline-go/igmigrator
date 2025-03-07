@@ -1,0 +1,5 @@
+-- NOT RUN
+CREATE TABLE IF NOT EXISTS test_not (
+    id INT PRIMARY KEY,
+    name TEXT
+);
