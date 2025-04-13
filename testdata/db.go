@@ -2,6 +2,7 @@ package testdata
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -22,7 +23,7 @@ func PrepareDB() (*sqlx.DB, string, func()) {
 		}
 	})
 
-	db := sqlx.MustConnect("pgx", fmt.Sprintf("postgres://postgres:postgres@%s:5432/", postgresHost))
+	db := sqlx.MustConnect("pgx", "postgres://postgres@"+net.JoinHostPort(postgresHost, "5432"))
 
 	schemaName := fmt.Sprintf("igmigrator_%d", atomic.AddInt32(&schemaCount, 1))
 
