@@ -1,6 +1,7 @@
 package igmigrator
 
 import (
+	"io/fs"
 	"os"
 	"regexp"
 	"strings"
@@ -19,7 +20,10 @@ type Config struct {
 	// By default, has value of `/var/migrations/`, and should not be changed if not required.
 	// It is possible to set this value from environment variable `IGMIGRATOR_MIGRATION_DIR`
 	// if value for this variable is not set.
+	//
+	// With `embed.FS` this is the sub fs that will be used to read the migration files.
 	MigrationsDir string
+	Migrations    fs.FS
 	// PreFolders to run before migrations in the migration directory.
 	PreFolders []string
 	// Schema can specify which schema(using `set search_path`) should be used to run migrations in.
@@ -33,22 +37,14 @@ type Config struct {
 	// if value for this variable is not set.
 	MigrationTable string
 
-	// BeforeMigrationsFunc will be called after current DB version is retrieved
-	BeforeMigrationsFunc
-	// AfterSingleMigrationFunc will be called after each single transaction was run
-	AfterSingleMigrationFunc
-	// AfterAllMigrationsFunc will be executed when all migrations were executed successfully.
-	// It will not be called if any error happened.
-	AfterAllMigrationsFunc
-
 	// Values for expand function in migration files.
 	Values map[string]string
 
 	Logger logz.Adapter
 }
 
-// SetDefaults will update missing values with default ones(if any).
-func (c *Config) SetDefaults() {
+// Sanitize will update missing values with default ones(if any).
+func (c *Config) Sanitize() {
 	replaceRegexp := regexp.MustCompile("[^a-zA-Z0-9_]")
 
 	trim := func(input string) string {
@@ -74,4 +70,8 @@ func (c *Config) SetDefaults() {
 
 	c.MigrationTable = trim(c.MigrationTable)
 	c.Schema = trim(c.Schema)
+
+	if c.Migrations != nil {
+		c.MigrationsDir = "."
+	}
 }

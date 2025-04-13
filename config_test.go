@@ -50,7 +50,7 @@ func TestConfig_SetDefaults(t *testing.T) {
 		test := tests[i]
 
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			test.Input.SetDefaults()
+			test.Input.Sanitize()
 			test.Validate(t, test.Input)
 		})
 

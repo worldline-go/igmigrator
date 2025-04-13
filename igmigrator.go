@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,15 +21,9 @@ import (
 
 var DefaultSkipDirs = []string{"archive"}
 
-type (
-	BeforeMigrationsFunc     func(ctx context.Context, currentVersion int)
-	AfterSingleMigrationFunc func(ctx context.Context, filePath string, newVersion int)
-	AfterAllMigrationsFunc   func(ctx context.Context, result *MigrateResult)
-)
-
 // DefaultMigrationFileSkipper defines default behavior for skipping migration files.
 // File will be skipped if it is a directory, does not have suffix ".sql" or does not have version suffix.
-func DefaultMigrationFileSkipper(file os.FileInfo, currentVersion int) bool {
+func DefaultMigrationFileSkipper(file fs.DirEntry, currentVersion int) bool {
 	fileName := file.Name()
 	if file.IsDir() || !strings.HasSuffix(fileName, ".sql") {
 		return true
@@ -52,8 +46,8 @@ type DB interface {
 
 // Transaction holds related database methods.
 type Transaction interface {
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 type Migrator struct {
@@ -101,10 +95,6 @@ func Migrate(ctx context.Context, db DB, cnf *Config) (*MigrateResult, error) {
 		return nil, err
 	}
 
-	if cnf.AfterAllMigrationsFunc != nil {
-		cnf.AfterAllMigrationsFunc(ctx, result)
-	}
-
 	return result, nil
 }
 
@@ -113,7 +103,7 @@ func Migrate(ctx context.Context, db DB, cnf *Config) (*MigrateResult, error) {
 // This function MUST operate on transaction! If plain database connection will be provided - it will return error.
 // This function will do only DB queries, which means that no transaction stuff will be used.
 func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (*MigrateResult, error) {
-	cnf.SetDefaults()
+	cnf.Sanitize()
 
 	migration := Migrator{
 		Cnf:    cnf,
@@ -183,10 +173,6 @@ func migrateInTxDir(ctx context.Context, m *Migrator, dir string) (int, int, err
 		return lastVersion, lastVersion, err
 	}
 
-	if bmf := m.Cnf.BeforeMigrationsFunc; bmf != nil {
-		bmf(ctx, lastVersion)
-	}
-
 	newVersion, err := m.MigrateMultiple(ctx, migrations, lastVersion)
 	if err != nil {
 		return lastVersion, lastVersion, err
@@ -206,37 +192,6 @@ func (m *Migrator) prepareDB(ctx context.Context) error {
 	// Migrate versions of igmigrator itself
 
 	return nil
-}
-
-func (m *Migrator) GetDirs() ([]string, error) {
-	dirs := []string{}
-	if err := filepath.Walk(m.Cnf.MigrationsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if slices.Contains(DefaultSkipDirs, info.Name()) {
-				return filepath.SkipDir
-			}
-
-			dirs = append(dirs, path) // Add directory path to slice
-		}
-
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
-	for i := range dirs {
-		v := strings.TrimPrefix(dirs[i], m.Cnf.MigrationsDir)
-		if !strings.HasPrefix(v, "/") {
-			v = "/" + v
-		}
-
-		dirs[i] = v
-	}
-
-	return m.addPreFolders(dirs), nil
 }
 
 func (m *Migrator) addPreFolders(dirs []string) []string {
@@ -278,12 +233,7 @@ func (m *Migrator) addPreFolders(dirs []string) []string {
 // By default, it will not include any migrations that are below current version,
 // but this behavior could be changed by changing MigrationFileSkipper.
 func (m *Migrator) GetMigrationFiles(migrationDir string, lastVersion int) ([]string, error) {
-	dir, err := os.Open(migrationDir)
-	if err != nil {
-		return nil, err
-	}
-
-	files, err := dir.Readdir(0)
+	files, err := m.readdir(migrationDir)
 	if err != nil {
 		return nil, err
 	}
@@ -341,10 +291,6 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 
 		// This single migrations should not be point of interest in most cases.
 		m.Logger.Info("success run migration", "migrated_to", newVersion, "path", directoryPath, "migration_path", filePath)
-
-		if am := m.Cnf.AfterSingleMigrationFunc; am != nil {
-			am(ctx, filePath, newVersion)
-		}
 	}
 
 	return newVersion, nil
@@ -353,7 +299,7 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 // MigrateSingle executes a single migration.
 // It does not increase version in migration table.
 func (m *Migrator) MigrateSingle(ctx context.Context, filePath string) error {
-	migration, err := os.ReadFile(filePath)
+	migration, err := m.readFile(filePath)
 	if err != nil {
 		return err
 	}

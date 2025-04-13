@@ -3,18 +3,17 @@ package igmigrator
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/worldline-go/igmigrator/v2/testdata"
+	"github.com/worldline-go/logz"
 )
 
 type tableStruct struct {
@@ -29,8 +28,7 @@ type migrationData struct {
 }
 
 func TestMain(m *testing.M) {
-	v := zerolog.New(os.Stderr)
-	zerolog.DefaultContextLogger = &v
+	logz.InitializeLog()
 
 	m.Run()
 }
@@ -230,7 +228,7 @@ func TestMigrations(t *testing.T) {
 			defer cleanup()
 
 			conf := &Config{MigrationsDir: testdata.Path(test.Path), Schema: schemaName, Values: test.Values}
-			conf.SetDefaults()
+			conf.Sanitize()
 
 			if test.ConfigFunc != nil {
 				test.ConfigFunc(conf)
@@ -400,7 +398,7 @@ func TestMigrate_Locking(t *testing.T) {
 			scenario.init(mck)
 
 			conf := &Config{}
-			conf.SetDefaults()
+			conf.Sanitize()
 			conf.MigrationsDir = testdata.Path("locking")
 
 			result, err := Migrate(context.Background(), db, conf)
