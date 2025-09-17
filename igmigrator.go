@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -280,11 +281,16 @@ func (m *Migrator) MigrateMultiple(ctx context.Context, migrations []string, las
 		filePath := path.Join(m.Cnf.MigrationsDir, fileName)
 		newVersion = VersionFromFile(filepath.Base(fileName))
 
-		if err := m.MigrateSingle(ctx, filePath); err != nil {
-			return lastVersion, fmt.Errorf("failed migration on %s version %d: %w", filePath, newVersion, err)
+		directoryPath := getPath(fileName)
+
+		if slices.Contains(m.Cnf.Skip[directoryPath], newVersion) {
+			m.Logger.Info("skipping migration", "skipped_version", newVersion, "path", getPath(fileName), "migration_path", filePath)
+		} else {
+			if err := m.MigrateSingle(ctx, filePath); err != nil {
+				return lastVersion, fmt.Errorf("failed migration on %s version %d: %w", filePath, newVersion, err)
+			}
 		}
 
-		directoryPath := getPath(fileName)
 		if err := m.InsertNewVersion(ctx, directoryPath, newVersion); err != nil {
 			return lastVersion, err
 		}

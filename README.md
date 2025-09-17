@@ -41,7 +41,7 @@ Without a number start, it will be assumed `-1` and it is skipped in `DefaultMig
 
 ```go
 // For demo postgres database
-// docker run --rm -it -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:14.12-alpine
+// docker run --rm -it -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:14-alpine
 db, err := sqlx.Connect("pgx", "postgres://postgres@localhost:5432/postgres")
 if err != nil {
     log.Error().Msgf("migrate database connect: %v", err)

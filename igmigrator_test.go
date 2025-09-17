@@ -57,8 +57,6 @@ func TestSetSchema(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		test := test
-
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			db, mck, err := sqlmock.New()
 			require.Nil(t, err)
@@ -427,4 +425,39 @@ func TestMigrate_AddPreFolder(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"/inner", "/", "/other"}, v)
+}
+
+func TestMigrate_Skip(t *testing.T) {
+	db, schemaName, cleanup := testdata.PrepareDB()
+	defer cleanup()
+
+	cfg := &Config{
+		MigrationsDir: "testdata/skip_sub",
+		Skip: map[string][]int{
+			"/sub": {3},
+		},
+		Schema: schemaName,
+	}
+
+	result, err := Migrate(t.Context(), db, cfg)
+	require.NoError(t, err)
+
+	for path, v := range result.Path {
+		switch path {
+		case "/":
+			assert.Equal(t, 0, v.PrevVersion, "path: %s", path)
+			assert.Equal(t, 2, v.NewVersion, "path: %s", path)
+		case "/sub":
+			assert.Equal(t, 0, v.PrevVersion, "path: %s", path)
+			assert.Equal(t, 3, v.NewVersion, "path: %s", path)
+		default:
+			t.Errorf("unknown path: %s", path)
+		}
+	}
+
+	// check if migration 2 was skipped
+	var count int
+	err = db.Get(&count, "SELECT count(1) FROM information_schema.columns WHERE table_name='dummy' AND table_schema=$1", schemaName)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
 }

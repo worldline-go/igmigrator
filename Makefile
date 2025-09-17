@@ -2,7 +2,7 @@
 
 .PHONY: db
 db: ## Start postgres container
-	docker run -d --name postgres -e POSTGRES_HOST_AUTH_METHOD=trust -p 5432:5432 postgres:13-alpine
+	docker run -d --name postgres -e POSTGRES_HOST_AUTH_METHOD=trust -p 5432:5432 postgres:14-alpine
 
 .PHONY: db-down
 db-down: ## Stop and rm postgres container

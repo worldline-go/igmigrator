@@ -36,6 +36,9 @@ type Config struct {
 	// It is possible to set this value from environment variable `IGMIGRATION_MIGRATION_TABLE`
 	// if value for this variable is not set.
 	MigrationTable string
+	// Skip act as applied migration file but without actually applying it.
+	// - Base path is '/' and folders like '/sub'.
+	Skip map[string][]int
 
 	// Values for expand function in migration files.
 	Values map[string]string
