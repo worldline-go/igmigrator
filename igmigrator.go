@@ -151,15 +151,22 @@ func MigrateInTx(ctx context.Context, tx Transaction, cnf *Config) (*MigrateResu
 }
 
 func migrateInTxDir(ctx context.Context, m *Migrator, dir string) (int, int, error) {
-	lastVersion, err := m.GetLastVersion(ctx, dir)
-	if err != nil {
+	// Optimistic check without lock - if no migrations needed, skip locking entirely.
+	lastVersion, migrations, err := m.pendingMigrations(ctx, dir)
+	if err != nil || len(migrations) == 0 {
+		m.Logger.Info("database is up to date", "path", dir)
+
+		return lastVersion, lastVersion, err
+	}
+
+	// Migrations found - acquire lock to prevent race conditions.
+	if err := m.AcquireLock(ctx); err != nil {
 		return 0, 0, err
 	}
 
-	m.Logger.Info("current database version", "path", dir, "version", lastVersion)
-
-	migrations, err := m.GetMigrationFiles(path.Join(m.Cnf.MigrationsDir, dir), lastVersion)
-	if err != nil || len(migrations) == 0 { // Exit early if nothing to do
+	// Re-check under lock: another process may have already applied migrations.
+	lastVersion, migrations, err = m.pendingMigrations(ctx, dir)
+	if err != nil || len(migrations) == 0 {
 		m.Logger.Info("database is up to date", "path", dir)
 
 		return lastVersion, lastVersion, err
@@ -169,10 +176,7 @@ func migrateInTxDir(ctx context.Context, m *Migrator, dir string) (int, int, err
 		migrations[i] = path.Join(dir, migrations[i])
 	}
 
-	// Lock migration table to avoid race condition.
-	if err := m.AcquireLock(ctx); err != nil {
-		return lastVersion, lastVersion, err
-	}
+	m.Logger.Info("current database version", "path", dir, "version", lastVersion)
 
 	newVersion, err := m.MigrateMultiple(ctx, migrations, lastVersion)
 	if err != nil {
@@ -180,6 +184,21 @@ func migrateInTxDir(ctx context.Context, m *Migrator, dir string) (int, int, err
 	}
 
 	return lastVersion, newVersion, nil
+}
+
+// pendingMigrations returns the current version and any migration files that need to be applied.
+func (m *Migrator) pendingMigrations(ctx context.Context, dir string) (int, []string, error) {
+	lastVersion, err := m.GetLastVersion(ctx, dir)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	migrations, err := m.GetMigrationFiles(path.Join(m.Cnf.MigrationsDir, dir), lastVersion)
+	if err != nil {
+		return lastVersion, nil, err
+	}
+
+	return lastVersion, migrations, nil
 }
 
 // prepareDB creates migration table and locks it

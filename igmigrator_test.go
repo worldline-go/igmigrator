@@ -353,10 +353,12 @@ func TestMigrate_Locking(t *testing.T) {
 
 				// Create migration table if not exists.
 				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( path VARCHAR\\(1000\\) NOT NULL DEFAULT '/', version INT, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\), PRIMARY KEY \\(path, version\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
-				// Get actual version.
+				// Optimistic version check (before lock).
 				mck.ExpectQuery("SELECT MAX\\(version\\) FROM migration").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(int64(0)))
 				// Lock migration table.
 				mck.ExpectExec("lock table migration in ACCESS EXCLUSIVE mode").WillReturnResult(sqlmock.NewResult(0, 0))
+				// Re-check version under lock.
+				mck.ExpectQuery("SELECT MAX\\(version\\) FROM migration").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(int64(0)))
 				// Apply db schema change.
 				mck.ExpectExec("CREATE TABLE accounts \\( user_id serial PRIMARY KEY, last_login TIMESTAMP \\)").WillReturnResult(sqlmock.NewResult(1, 1))
 				// Update version.
@@ -368,7 +370,7 @@ func TestMigrate_Locking(t *testing.T) {
 			actual: 1,
 		},
 		{
-			name: "no_update_no_lock",
+			name: "no_update_still_lock",
 			init: func(mck sqlmock.Sqlmock) {
 				mck.MatchExpectationsInOrder(true)
 
@@ -376,8 +378,7 @@ func TestMigrate_Locking(t *testing.T) {
 
 				// Create migration table if not exists.
 				mck.ExpectExec("CREATE TABLE IF NOT EXISTS migration \\( path VARCHAR\\(1000\\) NOT NULL DEFAULT '/', version INT, migrated_on TIMESTAMPTZ NOT NULL DEFAULT NOW\\(\\), PRIMARY KEY \\(path, version\\) \\)").WillReturnResult(sqlmock.NewResult(0, 0))
-
-				// Get actual version.
+				// Optimistic version check - already up to date, no lock needed.
 				mck.ExpectQuery("SELECT MAX\\(version\\) FROM migration").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(int64(1)))
 
 				mck.ExpectCommit()
